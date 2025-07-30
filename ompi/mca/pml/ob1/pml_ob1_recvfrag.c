@@ -118,7 +118,7 @@ append_frag_to_umq(custom_match_umq *queue, mca_btl_base_module_t *btl,
  */
 void ompi_pml_ob1_append_frag_to_ordered_list (mca_pml_ob1_recv_frag_t **queue,
                                   mca_pml_ob1_recv_frag_t *frag,
-                                  uint16_t seq)
+                                  uint16_t seq)//matching lock as additional parameter to only lock when needed
 {
     mca_pml_ob1_recv_frag_t  *prior, *next;
     const mca_pml_ob1_match_hdr_t *hdr = &frag->hdr.hdr_match;
@@ -128,10 +128,10 @@ void ompi_pml_ob1_append_frag_to_ordered_list (mca_pml_ob1_recv_frag_t **queue,
     frag->range = NULL;
 
     if (NULL == *queue) {  /* no pending fragments yet */
-        *queue = frag;
+        *queue = frag;// atomic update
         return;
     }
-
+    // lock
     prior = *queue;
     assert(hdr->hdr_seq != prior->hdr.hdr_match.hdr_seq);
 
@@ -228,31 +228,36 @@ void ompi_pml_ob1_append_frag_to_ordered_list (mca_pml_ob1_recv_frag_t **queue,
         if( next == *queue )
             *queue = parent;
     }
+    // unlock
 }
 
 /*
  * remove the head of ordered list and restructure the list.
  */
 static mca_pml_ob1_recv_frag_t*
-remove_head_from_ordered_list(mca_pml_ob1_recv_frag_t** queue)
+remove_head_from_ordered_list(mca_pml_ob1_recv_frag_t** queue) // TODO use matching lock as a parameter to lock if necessary
 {
+    // additional performance optimization possible if < 10 elements: no use of ranges, to avoid locking?
     mca_pml_ob1_recv_frag_t* frag = *queue;
     /* queue is empty, nothing to see. */
     if( NULL == *queue )
-        return NULL;
+        return NULL; // no lock needed
     if( NULL == frag->range ) {
         /* head has no range, */
         if( frag->super.super.opal_list_next == (opal_list_item_t*)frag ) {
             /* head points to itself means it is the only
              * one in this queue. We set the new head to NULL */
-            *queue = NULL;
+            *queue = NULL; // need to be atomic but no need to lock
         } else {
+            // lock
             /* make the next one a new head. */
             *queue = (mca_pml_ob1_recv_frag_t*)frag->super.super.opal_list_next;
             frag->super.super.opal_list_next->opal_list_prev = frag->super.super.opal_list_prev;
             frag->super.super.opal_list_prev->opal_list_next = frag->super.super.opal_list_next;
+            // unlock
         }
     } else {
+        //lock
         /* head has range */
         mca_pml_ob1_recv_frag_t* range = frag->range;
         frag->range = NULL;
@@ -277,6 +282,7 @@ remove_head_from_ordered_list(mca_pml_ob1_recv_frag_t** queue)
             range->super.super.opal_list_next->opal_list_prev = (opal_list_item_t*)range;
             range->super.super.opal_list_prev->opal_list_next = (opal_list_item_t*)range;
         }
+        // unlock
     }
     frag->super.super.opal_list_next = NULL;
     frag->super.super.opal_list_prev = NULL;
@@ -450,6 +456,8 @@ mca_pml_ob1_recv_frag_t *ompi_pml_ob1_check_cantmatch_for_match (mca_pml_ob1_com
     return NULL;
 }
 
+
+// this is the main entry point into the matching??
 void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
                                            const mca_btl_base_receive_descriptor_t *descriptor)
 {
@@ -485,6 +493,7 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
     }
     comm = (mca_pml_ob1_comm_t *)comm_ptr->c_pml_comm;
 
+
     /* source sequence number */
     proc = mca_pml_ob1_peer_lookup (comm_ptr, hdr->hdr_src);
 
@@ -518,23 +527,25 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
     }
 #endif
 
-    if (!OMPI_COMM_CHECK_ASSERT_ALLOW_OVERTAKE(comm_ptr) || 0 > hdr->hdr_tag) {
+    if (!OMPI_COMM_CHECK_ASSERT_ALLOW_OVERTAKE(comm_ptr) || 0 > hdr->hdr_tag) {// dont need lock for that
         /* get sequence number of next message that can be processed.
          * If this frag is out of sequence, queue it up in the list
          * now as we still have the lock.
          */
-        if(OPAL_UNLIKELY(((uint16_t) hdr->hdr_seq) != ((uint16_t) proc->expected_sequence))) {
+        if(OPAL_UNLIKELY(((uint16_t) hdr->hdr_seq) != ((uint16_t) proc->expected_sequence))) {// dont need lock for that
             mca_pml_ob1_recv_frag_t* frag;
             MCA_PML_OB1_RECV_FRAG_ALLOC(frag);
             MCA_PML_OB1_RECV_FRAG_INIT(frag, hdr, segments, num_segments, btl);
+            //TODO may need lock for that:
             ompi_pml_ob1_append_frag_to_ordered_list(&proc->frags_cant_match, frag, proc->expected_sequence);
             SPC_RECORD(OMPI_SPC_OUT_OF_SEQUENCE, 1);
+            // other T may processed the correct sequence number by now while we allocated the fragment. need to handle that explicitly??
             OB1_MATCHING_UNLOCK(&comm->matching_lock);
             return;
         }
 
         /* We're now expecting the next sequence number. */
-        proc->expected_sequence++;
+        proc->expected_sequence++; // dont need lock: atomic increment will suffice compare and swap with above if
     }
 
     /* We generate the SEARCH_POSTED_QUEUE only when the message is
@@ -542,7 +553,9 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
      * generation until we reach the correct sequence number.
      */
     PERUSE_TRACE_MSG_EVENT(PERUSE_COMM_SEARCH_POSTED_Q_BEGIN, comm_ptr,
-                           hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV);
+                           hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV);// lock probably not important here
+
+
 
     match = match_one(btl, hdr, segments, num_segments, comm_ptr, proc, NULL);
 
@@ -551,7 +564,7 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
      * a difference for the searching time for all messages.
      */
     PERUSE_TRACE_MSG_EVENT(PERUSE_COMM_SEARCH_POSTED_Q_END, comm_ptr,
-                           hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV);
+                           hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV);// lock probably not important here -- in my build its an empty macro anyway
 
     /* release matching lock before processing fragment */
     OB1_MATCHING_UNLOCK(&comm->matching_lock);
@@ -623,8 +636,9 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
     if(NULL != proc->frags_cant_match) {
         mca_pml_ob1_recv_frag_t* frag;
 
+
         OB1_MATCHING_LOCK(&comm->matching_lock);
-        if((frag = ompi_pml_ob1_check_cantmatch_for_match(proc))) {
+        if((frag = ompi_pml_ob1_check_cantmatch_for_match(proc))) {// need lock when removing from list, but this should be implementable in a lock-free way
             /* mca_pml_ob1_recv_frag_match_proc() will release the lock. */
             mca_pml_ob1_recv_frag_match_proc(frag->btl, comm_ptr, proc,
                                              &frag->hdr.hdr_match,
@@ -908,7 +922,7 @@ static mca_pml_ob1_recv_request_t *match_incomming(const mca_pml_ob1_match_hdr_t
 
     return NULL;
 #else
-    return custom_match_prq_find_dequeue_verify(comm->prq, hdr->hdr_tag, hdr->hdr_src);
+    return custom_match_prq_find_dequeue_verify(comm->prq, hdr->hdr_tag, hdr->hdr_src); // assume no lock needed
 #endif
 }
 
@@ -947,12 +961,12 @@ static mca_pml_ob1_recv_request_t *match_one (mca_btl_base_module_t *btl,
 #endif
     SPC_TIMER_START(OMPI_SPC_MATCH_TIME, &timer);
 
-    mca_pml_ob1_recv_request_t *match;
-    mca_pml_ob1_comm_t *comm = (mca_pml_ob1_comm_t *)comm_ptr->c_pml_comm;
+    mca_pml_ob1_recv_request_t *match; // dont need lock here
+    mca_pml_ob1_comm_t *comm = (mca_pml_ob1_comm_t *)comm_ptr->c_pml_comm; // dont need lock here
 
     do {
 #if MCA_PML_OB1_CUSTOM_MATCH
-        match = match_incomming(hdr, comm, proc);
+        match = match_incomming(hdr, comm, proc); // assume no lock (as the queue locks itself if needed)
 #else
         if (!OMPI_COMM_CHECK_ASSERT_NO_ANY_SOURCE (comm_ptr)) {
             match = match_incomming(hdr, comm, proc);
@@ -961,6 +975,7 @@ static mca_pml_ob1_recv_request_t *match_one (mca_btl_base_module_t *btl,
         }
 #endif
 
+        //TODO do we need a lock here, i assume that it is not necessary for processing the probe and mrobe cases
         /* if match found, process data */
         if(OPAL_LIKELY(NULL != match)) {
             match->req_recv.req_base.req_proc = proc->ompi_proc;
@@ -1001,11 +1016,12 @@ static mca_pml_ob1_recv_request_t *match_one (mca_btl_base_module_t *btl,
         /* if no match found, place on unexpected queue */
 #if MCA_PML_OB1_CUSTOM_MATCH
         append_frag_to_umq(comm->umq, btl, hdr, segments,
-                            num_segments, frag);
+                            num_segments, frag); // assume no lock
 #else
         append_frag_to_list(&proc->unexpected_frags, btl, hdr, segments,
                             num_segments, frag);
 #endif
+        // no lock, macros are empty in my build anyway
         SPC_RECORD(OMPI_SPC_UNEXPECTED, 1);
         SPC_RECORD(OMPI_SPC_UNEXPECTED_IN_QUEUE, 1);
         SPC_UPDATE_WATERMARK(OMPI_SPC_MAX_UNEXPECTED_IN_QUEUE, OMPI_SPC_UNEXPECTED_IN_QUEUE);
@@ -1161,8 +1177,8 @@ mca_pml_ob1_recv_frag_match_proc (mca_btl_base_module_t *btl,
                                   mca_pml_ob1_recv_frag_t *frag)
 {
     /* local variables */
-    mca_pml_ob1_comm_t *comm = (mca_pml_ob1_comm_t *)comm_ptr->c_pml_comm;
-    mca_pml_ob1_recv_request_t *match = NULL;
+    mca_pml_ob1_comm_t *comm = (mca_pml_ob1_comm_t *)comm_ptr->c_pml_comm; // no lock
+    mca_pml_ob1_recv_request_t *match = NULL; // no lock
 
     /* If we are here, this is the sequence number we were expecting,
      * so we can try matching it to already posted receives.
@@ -1174,7 +1190,7 @@ mca_pml_ob1_recv_frag_match_proc (mca_btl_base_module_t *btl,
      * but adding a branch in this critical path is not ideal for performance.
      * We decided to let it run the sequence number even we are not doing
      * anything with it. */
-    proc->expected_sequence++;
+    proc->expected_sequence++; // no lock if atomic
 
     /* We generate the SEARCH_POSTED_QUEUE only when the message is
      * received in the correct sequence. Otherwise, we delay the event
@@ -1182,15 +1198,16 @@ mca_pml_ob1_recv_frag_match_proc (mca_btl_base_module_t *btl,
      */
     PERUSE_TRACE_MSG_EVENT(PERUSE_COMM_SEARCH_POSTED_Q_BEGIN, comm_ptr,
                            hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV);
+    // no lock
 
-    match = match_one(btl, hdr, segments, num_segments, comm_ptr, proc, frag);
+    match = match_one(btl, hdr, segments, num_segments, comm_ptr, proc, frag); // assume no lock
 
     /* The match is over. We generate the SEARCH_POSTED_Q_END here,
      * before going into check_cantmatch_for_match we can make a
      * difference for the searching time for all messages.
      */
     PERUSE_TRACE_MSG_EVENT(PERUSE_COMM_SEARCH_POSTED_Q_END, comm_ptr,
-                           hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV);
+                           hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV); // no lock
 
     /* release matching lock before processing fragment */
     OB1_MATCHING_UNLOCK(&comm->matching_lock);
@@ -1219,7 +1236,7 @@ mca_pml_ob1_recv_frag_match_proc (mca_btl_base_module_t *btl,
      */
     if(OPAL_UNLIKELY(NULL != proc->frags_cant_match)) {
         OB1_MATCHING_LOCK(&comm->matching_lock);
-        if((frag = ompi_pml_ob1_check_cantmatch_for_match(proc))) {
+        if((frag = ompi_pml_ob1_check_cantmatch_for_match(proc))) { // same as previousely: need lock for list removal, but should be implementable in another way
             hdr = &frag->hdr.hdr_match;
             segments = frag->segments;
             num_segments = frag->num_segments;
