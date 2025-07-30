@@ -446,12 +446,15 @@ int mca_pml_ob1_revoke_comm( struct ompi_communicator_t* ompi_comm, bool coll_on
 }
 #endif /*OPAL_ENABLE_FT_MPI*/
 
-mca_pml_ob1_recv_frag_t *ompi_pml_ob1_check_cantmatch_for_match (mca_pml_ob1_comm_proc_t *proc)
+mca_pml_ob1_recv_frag_t *ompi_pml_ob1_check_cantmatch_for_match (mca_pml_ob1_comm_proc_t *proc,opal_mutex_t* matching_lock)
 {
     mca_pml_ob1_recv_frag_t *frag = proc->frags_cant_match;
 
-    if( (NULL != frag) && (frag->hdr.hdr_match.hdr_seq == proc->expected_sequence) ) {
-        return remove_head_from_ordered_list(&proc->frags_cant_match);
+    if( (NULL != frag) && (frag->hdr.hdr_match.hdr_seq == __atomic_load_n(&proc->expected_sequence,__ATOMIC_ACQUIRE) )) {
+        OB1_MATCHING_LOCK(matching_lock);
+        mca_pml_ob1_recv_frag_t * result =remove_head_from_ordered_list(&proc->frags_cant_match);
+        OB1_MATCHING_UNLOCK(matching_lock);
+        return result;
     }
     return NULL;
 }
@@ -513,7 +516,7 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
      * end points) from being processed, and potentially "losing"
      * the fragment.
      */
-    OB1_MATCHING_LOCK(&comm->matching_lock);
+    //OB1_MATCHING_LOCK(&comm->matching_lock);
 
 #if OPAL_ENABLE_FT_MPI
     if( OPAL_UNLIKELY((ompi_comm_is_revoked(comm_ptr) && !ompi_request_tag_is_ft(hdr->hdr_tag)) ||
@@ -532,20 +535,27 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
          * If this frag is out of sequence, queue it up in the list
          * now as we still have the lock.
          */
-        if(OPAL_UNLIKELY(((uint16_t) hdr->hdr_seq) != ((uint16_t) proc->expected_sequence))) {// dont need lock for that
+
+        /* We're now expecting the next sequence number. */
+        //TODO portability this is a gcc atomic
+        // this does atomically increment proc->expected_sequence if it is equal to hdr->hdr_seq, otherwise proc->expected_sequence is not modified and the if branch triggered
+        uint16_t expected_sequence = hdr->hdr_seq;
+        bool is_expected_sequence = __atomic_compare_exchange_n(&proc->expected_sequence,&expected_sequence,hdr->hdr_seq+1,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE);
+        if(OPAL_UNLIKELY(! is_expected_sequence)) {// dont need lock for that
             mca_pml_ob1_recv_frag_t* frag;
             MCA_PML_OB1_RECV_FRAG_ALLOC(frag);
             MCA_PML_OB1_RECV_FRAG_INIT(frag, hdr, segments, num_segments, btl);
-            //TODO may need lock for that:
+            OB1_MATCHING_LOCK(&comm->matching_lock);
             ompi_pml_ob1_append_frag_to_ordered_list(&proc->frags_cant_match, frag, proc->expected_sequence);
             SPC_RECORD(OMPI_SPC_OUT_OF_SEQUENCE, 1);
-            // other T may processed the correct sequence number by now while we allocated the fragment. need to handle that explicitly??
+            //TODO other T may processed the correct sequence number by now while we allocated the fragment. need to handle that explicitly??
             OB1_MATCHING_UNLOCK(&comm->matching_lock);
             return;
         }
 
-        /* We're now expecting the next sequence number. */
-        proc->expected_sequence++; // dont need lock: atomic increment will suffice compare and swap with above if
+
+
+
     }
 
     /* We generate the SEARCH_POSTED_QUEUE only when the message is
@@ -567,7 +577,7 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
                            hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV);// lock probably not important here -- in my build its an empty macro anyway
 
     /* release matching lock before processing fragment */
-    OB1_MATCHING_UNLOCK(&comm->matching_lock);
+    //OB1_MATCHING_UNLOCK(&comm->matching_lock);
 
     if(OPAL_LIKELY(match)) {
         bytes_received = segments->seg_len - OMPI_PML_OB1_MATCH_HDR_LEN;
@@ -637,15 +647,15 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
         mca_pml_ob1_recv_frag_t* frag;
 
 
-        OB1_MATCHING_LOCK(&comm->matching_lock);
-        if((frag = ompi_pml_ob1_check_cantmatch_for_match(proc))) {// need lock when removing from list, but this should be implementable in a lock-free way
+       //OB1_MATCHING_LOCK(&comm->matching_lock);
+        if((frag = ompi_pml_ob1_check_cantmatch_for_match(proc,&comm->matching_lock))) {// need lock when removing from list, but this should be implementable in a lock-free way
             /* mca_pml_ob1_recv_frag_match_proc() will release the lock. */
             mca_pml_ob1_recv_frag_match_proc(frag->btl, comm_ptr, proc,
                                              &frag->hdr.hdr_match,
                                              frag->segments, frag->num_segments,
                                              frag->hdr.hdr_match.hdr_common.hdr_type, frag);
         } else {
-            OB1_MATCHING_UNLOCK(&comm->matching_lock);
+           //OB1_MATCHING_UNLOCK(&comm->matching_lock);
         }
     }
 }
@@ -660,7 +670,7 @@ int mca_pml_ob1_merge_cant_match( ompi_communicator_t * ompi_comm )
     mca_pml_ob1_comm_proc_t* proc;
     int cnt = 0;
 
-    OB1_MATCHING_LOCK(&pml_comm->matching_lock);
+
     for (uint32_t i = 0; i < pml_comm->num_procs; i++) {
         if ((NULL == (proc = pml_comm->procs[i])) || (NULL != proc->frags_cant_match)) {
             continue;
@@ -669,17 +679,22 @@ int mca_pml_ob1_merge_cant_match( ompi_communicator_t * ompi_comm )
         /* Acquire all cant_match frags from the peer */
         frags_cant_match = proc->frags_cant_match;
         proc->frags_cant_match = NULL;
-        while(NULL != (frag = remove_head_from_ordered_list(&frags_cant_match))) {
+        OB1_MATCHING_LOCK(&pml_comm->matching_lock);
+        frag = remove_head_from_ordered_list(&frags_cant_match);
+        OB1_MATCHING_UNLOCK(&pml_comm->matching_lock);
+        while(NULL != frag) {
             /* mca_pml_ob1_recv_frag_match_proc() will release the lock. */
             mca_pml_ob1_recv_frag_match_proc(frag->btl, ompi_comm, proc,
                                              &frag->hdr.hdr_match,
                                              frag->segments, frag->num_segments,
                                              frag->hdr.hdr_match.hdr_common.hdr_type, frag);
-            OB1_MATCHING_LOCK(&pml_comm->matching_lock);
             cnt++;
+                    OB1_MATCHING_LOCK(&pml_comm->matching_lock);
+        frag = remove_head_from_ordered_list(&frags_cant_match);
+        OB1_MATCHING_UNLOCK(&pml_comm->matching_lock);
         }
     }
-    OB1_MATCHING_UNLOCK(&pml_comm->matching_lock);
+
     return cnt;
 }
 
@@ -1110,7 +1125,7 @@ static int mca_pml_ob1_recv_frag_match (mca_btl_base_module_t *btl,
      * end points) from being processed, and potentially "losing"
      * the fragment.
      */
-    OB1_MATCHING_LOCK(&comm->matching_lock);
+    //OB1_MATCHING_LOCK(&comm->matching_lock);
 
 #if OPAL_ENABLE_FT_MPI
     if( OPAL_UNLIKELY((ompi_comm_is_revoked(comm_ptr) && !ompi_request_tag_is_ft(hdr->hdr_tag) )) ||
@@ -1134,7 +1149,9 @@ static int mca_pml_ob1_recv_frag_match (mca_btl_base_module_t *btl,
 
     /* get sequence number of next message that can be processed */
     frag_msg_seq = hdr->hdr_seq;
-    next_msg_seq_expected = (uint16_t)proc->expected_sequence;
+
+    // use atomic load
+    next_msg_seq_expected = (uint16_t)__atomic_load_n(&proc->expected_sequence,__ATOMIC_ACQUIRE);
 
     if (!OMPI_COMM_CHECK_ASSERT_ALLOW_OVERTAKE(comm_ptr) || 0 > hdr->hdr_tag) {
         /* If the sequence number is wrong, queue it up for later. */
@@ -1142,13 +1159,15 @@ static int mca_pml_ob1_recv_frag_match (mca_btl_base_module_t *btl,
             mca_pml_ob1_recv_frag_t* frag;
             MCA_PML_OB1_RECV_FRAG_ALLOC(frag);
             MCA_PML_OB1_RECV_FRAG_INIT(frag, hdr, segments, num_segments, btl);
+            OB1_MATCHING_LOCK(&comm->matching_lock);
             ompi_pml_ob1_append_frag_to_ordered_list(&proc->frags_cant_match, frag, next_msg_seq_expected);
+            OB1_MATCHING_UNLOCK(&comm->matching_lock);
 
             SPC_RECORD(OMPI_SPC_OUT_OF_SEQUENCE, 1);
             SPC_RECORD(OMPI_SPC_OOS_IN_QUEUE, 1);
             SPC_UPDATE_WATERMARK(OMPI_SPC_MAX_OOS_IN_QUEUE, OMPI_SPC_OOS_IN_QUEUE);
 
-            OB1_MATCHING_UNLOCK(&comm->matching_lock);
+            //OB1_MATCHING_UNLOCK(&comm->matching_lock);
             return OMPI_SUCCESS;
         }
     }
@@ -1190,7 +1209,9 @@ mca_pml_ob1_recv_frag_match_proc (mca_btl_base_module_t *btl,
      * but adding a branch in this critical path is not ideal for performance.
      * We decided to let it run the sequence number even we are not doing
      * anything with it. */
-    proc->expected_sequence++; // no lock if atomic
+    //TODO Portability: this is the gcc builtin
+    __atomic_fetch_add(&proc->expected_sequence,1,__ATOMIC_ACQ_REL);
+    //proc->expected_sequence++; // no lock if atomic
 
     /* We generate the SEARCH_POSTED_QUEUE only when the message is
      * received in the correct sequence. Otherwise, we delay the event
@@ -1210,7 +1231,7 @@ mca_pml_ob1_recv_frag_match_proc (mca_btl_base_module_t *btl,
                            hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV); // no lock
 
     /* release matching lock before processing fragment */
-    OB1_MATCHING_UNLOCK(&comm->matching_lock);
+    //OB1_MATCHING_UNLOCK(&comm->matching_lock);
 
     if(OPAL_LIKELY(match)) {
         switch(type) {
@@ -1235,8 +1256,8 @@ mca_pml_ob1_recv_frag_match_proc (mca_btl_base_module_t *btl,
      * may now be used to form new matches
      */
     if(OPAL_UNLIKELY(NULL != proc->frags_cant_match)) {
-        OB1_MATCHING_LOCK(&comm->matching_lock);
-        if((frag = ompi_pml_ob1_check_cantmatch_for_match(proc))) { // same as previousely: need lock for list removal, but should be implementable in another way
+//        OB1_MATCHING_LOCK(&comm->matching_lock);
+        if((frag = ompi_pml_ob1_check_cantmatch_for_match(proc,&comm->matching_lock))) { // same as previousely: need lock for list removal, but should be implementable in another way
             hdr = &frag->hdr.hdr_match;
             segments = frag->segments;
             num_segments = frag->num_segments;
@@ -1244,7 +1265,7 @@ mca_pml_ob1_recv_frag_match_proc (mca_btl_base_module_t *btl,
             type = hdr->hdr_common.hdr_type;
             goto match_this_frag;
         }
-        OB1_MATCHING_UNLOCK(&comm->matching_lock);
+  //      OB1_MATCHING_UNLOCK(&comm->matching_lock);
     }
 
     return OMPI_SUCCESS;

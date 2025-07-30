@@ -171,7 +171,7 @@ extern void mca_pml_ob1_recv_frag_callback_cid( mca_btl_base_module_t *btl,
  * will be the next in sequence.
  */
 extern mca_pml_ob1_recv_frag_t*
-ompi_pml_ob1_check_cantmatch_for_match(mca_pml_ob1_comm_proc_t *proc);
+ompi_pml_ob1_check_cantmatch_for_match(mca_pml_ob1_comm_proc_t *proc,opal_mutex_t* matching_lock);
 
 /**
  * Move for all peers all pending cant_match fragments into the matching queues. This
