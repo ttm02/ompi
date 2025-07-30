@@ -1283,16 +1283,18 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
 
     MCA_PML_BASE_RECV_START(&req->req_recv);
 
-    OB1_MATCHING_LOCK(&ob1_comm->matching_lock);
+    //OB1_MATCHING_LOCK(&ob1_comm->matching_lock);
     /**
      * The laps of time between the ACTIVATE event and the SEARCH_UNEX one include
      * the cost of the request lock.
      */
     PERUSE_TRACE_COMM_EVENT(PERUSE_COMM_SEARCH_UNEX_Q_BEGIN,
-                            &(req->req_recv.req_base), PERUSE_RECV);
+                            &(req->req_recv.req_base), PERUSE_RECV);// no lock
 
     /* assign sequence number */
-    req->req_recv.req_base.req_sequence = ob1_comm->recv_sequence++;
+    //TODO this is the gcc atomic intrinsic - is there already a header thad defines the atomic for all supported compilers?
+    //TODO this memory order is sufficient?
+    req->req_recv.req_base.req_sequence = __atomic_fetch_add(&ob1_comm->recv_sequence,1,__ATOMIC_ACQ_REL);
 
 #if OPAL_ENABLE_FT_MPI
     /* if the communicator is not in a good state (revoked or coll_revoked), do not
@@ -1316,9 +1318,9 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
 
 
     /* attempt to match posted recv */
-    if(req->req_recv.req_base.req_peer == OMPI_ANY_SOURCE) {
+    if(req->req_recv.req_base.req_peer == OMPI_ANY_SOURCE) {// disabled branch per assertion
 #if MCA_PML_OB1_CUSTOM_MATCH
-        frag = recv_req_match_wild(req, &proc, &hold_prev, &hold_elem, &hold_index);
+        frag = recv_req_match_wild(req, &proc, &hold_prev, &hold_elem, &hold_index);// assume no lock  and not called
 #else
         frag = recv_req_match_wild(req, &proc);
         queue = &ob1_comm->wild_receives;
@@ -1329,22 +1331,23 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
          * we can safely construct the convertor based on the proc
          * information of rank 0.
          */
-        if( NULL == frag ) {
+        if( NULL == frag ) {// no lock
             req->req_recv.req_base.req_proc = ompi_proc_local_proc;
             prepare_recv_req_converter(req);
         }
 #endif  /* !OPAL_ENABLE_HETEROGENEOUS_SUPPORT */
     } else {
+        // will acquire and release the lock if it needs to - but usually only does a lookup
         proc = mca_pml_ob1_peer_lookup (comm, req->req_recv.req_base.req_peer);
         req->req_recv.req_base.req_proc = proc->ompi_proc;
 #if MCA_PML_OB1_CUSTOM_MATCH
-        frag = recv_req_match_specific_proc(req, proc, &hold_prev, &hold_elem, &hold_index);
+        frag = recv_req_match_specific_proc(req, proc, &hold_prev, &hold_elem, &hold_index);// assume no lock
 #else
         frag = recv_req_match_specific_proc(req, proc);
         queue = &proc->specific_receives;
 #endif
         /* wildcard recv will be prepared on match */
-        prepare_recv_req_converter(req);
+        prepare_recv_req_converter(req); // no lock, only operates on the request - which is owned by us
     }
 
     if(OPAL_UNLIKELY(NULL == frag)) {
@@ -1357,35 +1360,35 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
 #if MCA_PML_OB1_CUSTOM_MATCH
             custom_match_prq_append(ob1_comm->prq, req,
                                     req->req_recv.req_base.req_tag,
-                                    req->req_recv.req_base.req_peer);
+                                    req->req_recv.req_base.req_peer);// assume no lock
 #else
             append_recv_req_to_queue(queue, req);
 #endif
-        req->req_match_received = false;
-        OB1_MATCHING_UNLOCK(&ob1_comm->matching_lock);
+        req->req_match_received = false;// no lock
+        //OB1_MATCHING_UNLOCK(&ob1_comm->matching_lock);
     } else {
         if(OPAL_LIKELY(!IS_PROB_REQ(req))) {
             PERUSE_TRACE_COMM_EVENT(PERUSE_COMM_REQ_MATCH_UNEX,
-                                    &(req->req_recv.req_base), PERUSE_RECV);
+                                    &(req->req_recv.req_base), PERUSE_RECV); // no lock
 
-            hdr = (mca_pml_ob1_hdr_t*)frag->segments->seg_addr.pval;
+            hdr = (mca_pml_ob1_hdr_t*)frag->segments->seg_addr.pval; // no lock
             PERUSE_TRACE_MSG_EVENT(PERUSE_COMM_MSG_REMOVE_FROM_UNEX_Q,
                                    req->req_recv.req_base.req_comm,
                                    hdr->hdr_match.hdr_src,
                                    hdr->hdr_match.hdr_tag,
-                                   PERUSE_RECV);
+                                   PERUSE_RECV);// no lock
 
             PERUSE_TRACE_COMM_EVENT(PERUSE_COMM_SEARCH_UNEX_Q_END,
-                                    &(req->req_recv.req_base), PERUSE_RECV);
+                                    &(req->req_recv.req_base), PERUSE_RECV);// no lock
 
 #if MCA_PML_OB1_CUSTOM_MATCH
-            custom_match_umq_remove_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq, hold_prev, hold_elem, hold_index);
+            custom_match_umq_remove_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq, hold_prev, hold_elem, hold_index);// assume no lock
 #else
             opal_list_remove_item(&proc->unexpected_frags,
                                   (opal_list_item_t*)frag);
 #endif
-            SPC_RECORD(OMPI_SPC_UNEXPECTED_IN_QUEUE, -1);
-            OB1_MATCHING_UNLOCK(&ob1_comm->matching_lock);
+            SPC_RECORD(OMPI_SPC_UNEXPECTED_IN_QUEUE, -1);// no lock
+            //OB1_MATCHING_UNLOCK(&ob1_comm->matching_lock);
 
             switch(hdr->hdr_common.hdr_type) {
             case MCA_PML_OB1_HDR_TYPE_MATCH:
@@ -1415,20 +1418,20 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
                restarted with this request during mrecv */
 
 #if MCA_PML_OB1_CUSTOM_MATCH
-            custom_match_umq_remove_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq, hold_prev, hold_elem, hold_index);
+            custom_match_umq_remove_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq, hold_prev, hold_elem, hold_index);// assume no lock
 #else
             opal_list_remove_item(&proc->unexpected_frags,
                                   (opal_list_item_t*)frag);
 #endif
-            SPC_RECORD(OMPI_SPC_UNEXPECTED_IN_QUEUE, -1);
-            OB1_MATCHING_UNLOCK(&ob1_comm->matching_lock);
+            SPC_RECORD(OMPI_SPC_UNEXPECTED_IN_QUEUE, -1);// no lock
+            //OB1_MATCHING_UNLOCK(&ob1_comm->matching_lock);
 
             req->req_recv.req_base.req_addr = frag;
             mca_pml_ob1_recv_request_matched_probe(req, frag->btl,
                                                    frag->segments, frag->num_segments);
 
         } else {
-            OB1_MATCHING_UNLOCK(&ob1_comm->matching_lock);
+            //OB1_MATCHING_UNLOCK(&ob1_comm->matching_lock);
             mca_pml_ob1_recv_request_matched_probe(req, frag->btl,
                                                    frag->segments, frag->num_segments);
         }
