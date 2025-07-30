@@ -26,10 +26,10 @@
 #ifndef MCA_PML_OB1_COMM_H
 #define MCA_PML_OB1_COMM_H
 
-#include "opal/mca/threads/mutex.h"
-#include "opal/class/opal_list.h"
-#include "ompi/proc/proc.h"
 #include "ompi/communicator/communicator.h"
+#include "ompi/proc/proc.h"
+#include "opal/class/opal_list.h"
+#include "opal/mca/threads/mutex.h"
 
 /* NTH: at some point we need to untangle the headers. this declaration is needed
  * for headers included by the custom match code. */
@@ -39,14 +39,13 @@ typedef struct mca_pml_ob1_comm_proc_t mca_pml_ob1_comm_proc_t;
 
 BEGIN_C_DECLS
 
-
 struct mca_pml_ob1_comm_proc_t {
     opal_object_t super;
-    struct ompi_proc_t* ompi_proc;
-    uint16_t expected_sequence;    /**< send message sequence number - receiver side */
-    int16_t comm_index;           /**< index of this communicator on the receiver size (-1 - not set) */
-    opal_atomic_int32_t send_sequence; /**< send side sequence number */
-    struct mca_pml_ob1_recv_frag_t* frags_cant_match;  /**< out-of-order fragment queues */
+    struct ompi_proc_t *ompi_proc;
+    uint16_t expected_sequence; /**< send message sequence number - receiver side */
+    int16_t comm_index; /**< index of this communicator on the receiver size (-1 - not set) */
+    opal_atomic_int32_t send_sequence;                /**< send side sequence number */
+    struct mca_pml_ob1_recv_frag_t *frags_cant_match; /**< out-of-order fragment queues */
 #if !MCA_PML_OB1_CUSTOM_MATCH
     opal_list_t specific_receives; /**< queues of unmatched specific receives */
     opal_list_t unexpected_frags;  /**< unexpected fragment queues */
@@ -63,18 +62,19 @@ OBJ_CLASS_DECLARATION(mca_pml_ob1_comm_proc_t);
  */
 struct mca_pml_comm_t {
     opal_object_t super;
-    volatile uint32_t recv_sequence;  /**< recv request sequence number - receiver side */
-    opal_mutex_t matching_lock;   /**< matching lock */
+    volatile uint32_t recv_sequence; /**< recv request sequence number - receiver side */
+    opal_mutex_t matching_lock;      /**< matching lock */
 #if !MCA_PML_OB1_CUSTOM_MATCH
-    opal_list_t wild_receives;    /**< queue of unmatched wild (source process not specified) receives */
+    opal_list_t
+        wild_receives; /**< queue of unmatched wild (source process not specified) receives */
 #endif
     opal_mutex_t proc_lock;
-    mca_pml_ob1_comm_proc_t * volatile * procs;
+    mca_pml_ob1_comm_proc_t *volatile *procs;
     size_t num_procs;
     size_t last_probed;
 #if MCA_PML_OB1_CUSTOM_MATCH
-    custom_match_prq* prq;
-    custom_match_umq* umq;
+    custom_match_prq *prq;
+    custom_match_umq *umq;
 #endif
 };
 typedef struct mca_pml_comm_t mca_pml_ob1_comm_t;
@@ -84,11 +84,13 @@ OBJ_CLASS_DECLARATION(mca_pml_ob1_comm_t);
 /**
  * @brief Helper function to allocate/fill in ob1 proc for a comm/rank
  */
-mca_pml_ob1_comm_proc_t *mca_pml_ob1_peer_create (ompi_communicator_t *comm, mca_pml_ob1_comm_t *pml_comm, int rank);
+mca_pml_ob1_comm_proc_t *mca_pml_ob1_peer_create(ompi_communicator_t *comm,
+                                                 mca_pml_ob1_comm_t *pml_comm, int rank);
 
-static inline mca_pml_ob1_comm_proc_t *mca_pml_ob1_peer_lookup (struct ompi_communicator_t *comm, int rank)
+static inline mca_pml_ob1_comm_proc_t *mca_pml_ob1_peer_lookup(struct ompi_communicator_t *comm,
+                                                               int rank)
 {
-    mca_pml_ob1_comm_t *pml_comm = (mca_pml_ob1_comm_t *)comm->c_pml_comm;
+    mca_pml_ob1_comm_t *pml_comm = (mca_pml_ob1_comm_t *) comm->c_pml_comm;
 
     /**
      * We have very few ways to validate the correct, and collective, creation of
@@ -96,12 +98,20 @@ static inline mca_pml_ob1_comm_proc_t *mca_pml_ob1_peer_lookup (struct ompi_comm
      * can do is to check that we are not using a rank that is outside the scope
      * of the communicator.
      */
-    if( OPAL_UNLIKELY(rank >= (int)pml_comm->num_procs) ) {
+    if (OPAL_UNLIKELY(rank >= (int) pml_comm->num_procs)) {
         ompi_rte_abort(-1, "PML OB1 received a message from a rank outside the"
-                       " valid range of the communicator. Please submit a bug request!");
+                           " valid range of the communicator. Please submit a bug request!");
     }
     if (OPAL_UNLIKELY(NULL == pml_comm->procs[rank])) {
-        mca_pml_ob1_peer_create (comm, pml_comm, rank);
+        // guard creation by lock
+        OB1_MATCHING_LOCK(&pml_comm->matching_lock);
+        if (OPAL_LIKELY(NULL
+                          == pml_comm->procs[rank])) {
+            // need to check again when actually holding the lock, as other may have initialized peer by now
+            mca_pml_ob1_peer_create(comm, pml_comm, rank);
+        }
+        OB1_MATCHING_UNLOCK(&pml_comm->matching_lock);
+
     }
 
     return pml_comm->procs[rank];
@@ -115,8 +125,7 @@ static inline mca_pml_ob1_comm_proc_t *mca_pml_ob1_peer_lookup (struct ompi_comm
  * @return        OMPI_SUCCESS or error status on failure.
  */
 
-extern int mca_pml_ob1_comm_init_size(mca_pml_ob1_comm_t* comm, size_t size);
+extern int mca_pml_ob1_comm_init_size(mca_pml_ob1_comm_t *comm, size_t size);
 
 END_C_DECLS
 #endif
-
