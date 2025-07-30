@@ -346,7 +346,9 @@ int mca_pml_ob1_add_comm(ompi_communicator_t* comm)
              * the network.
              */
             if( NULL != pml_proc->frags_cant_match ) {
-                frag = ompi_pml_ob1_check_cantmatch_for_match(pml_proc);
+                // the locking part is not needed here, as we still own the comm at this moment
+                // nevertheless the unmatched queue implementation expects the lock
+                frag = ompi_pml_ob1_check_cantmatch_for_match(pml_proc,&pml_comm->matching_lock);
                 if( NULL != frag ) {
                     hdr = &frag->hdr.hdr_match;
                     goto add_fragment_to_unexpected;
