@@ -19,8 +19,11 @@ typedef struct custom_match_prq custom_match_prq;
 typedef struct custom_match_umq custom_match_umq;
 // dont use variable, just use locking for testing
 bool mca_pml_ob1_matching_protection =true;
-//bool opal_uses_threads=true;
-#include "../ompi/mca/pml/ob1/custommatch/pml_ob1_custom_match_linkedlist.h" // provides prq_init, prq_append, prq_find_dequeue, umq_init, umq_append, umq_find_dequeue
+
+#define NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
+
+#include "../ompi/mca/pml/ob1/custommatch/pml_ob1_custom_match_linkedlist.h"
+//#include "../ompi/mca/pml/ob1/custommatch/pml_ob1_custom_match_arrays.h"
 
 // from https://stackoverflow.com/questions/6127503/shuffle-array-in-c
 /* Arrange the N elements of ARRAY in random order.

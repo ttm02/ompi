@@ -19,6 +19,11 @@
 #include "../pml_ob1_recvreq.h"
 #include "../pml_ob1_recvfrag.h"
 
+#ifdef NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
+#undef CUSTOM_MATCH_DEBUG_VERBOSE
+#undef CUSTOM_MATCH_DEBUG
+#endif
+
 typedef struct custom_match_prq_node
 {
     __m512i tags;
