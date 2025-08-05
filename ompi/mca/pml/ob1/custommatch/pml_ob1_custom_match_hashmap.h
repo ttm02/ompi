@@ -153,35 +153,36 @@ static inline void *remove_from_list(struct bucket *my_bucket)
 // basically combining the different matching queues
 static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *payload, bool is_umq)
 {
-    bucket_collection my_bucket = map->buckets[hash_func(tag, peer)];
-    OB1_MATCHING_LOCK(&my_bucket.mutex);
+    bucket_collection *my_bucket = &map->buckets[hash_func(tag, peer)];
+    OB1_MATCHING_LOCK(&my_bucket->mutex);
 
     for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
-        if (OPAL_UNLIKELY(my_bucket.buckets[i].tag == -1)) {
+        if (OPAL_UNLIKELY(my_bucket->buckets[i].tag == -1)) {
             // initialize on first use
-
-            my_bucket.buckets[i].tag = tag;
-            my_bucket.buckets[i].peer = peer;
+            my_bucket->buckets[i].tag = tag;
+            my_bucket->buckets[i].peer = peer;
         }
-        if (OPAL_LIKELY(my_bucket.buckets[i].tag == tag && my_bucket.buckets[i].peer == peer)) {
+        if (OPAL_LIKELY(my_bucket->buckets[i].tag == tag && my_bucket->buckets[i].peer == peer)) {
             // found correct bucket
 
             // if list empty or same mode: insert to queue
-            if (my_bucket.buckets[i].is_umq == is_umq || my_bucket.buckets[i].bucket_head == NULL) {
+            if (my_bucket->buckets[i].is_umq == is_umq
+                || my_bucket->buckets[i].bucket_head == NULL) {
                 bucket_node *new_elem = get_bucket_node(map);
                 new_elem->tag = tag;
                 new_elem->peer = peer;
                 new_elem->next = NULL;
                 new_elem->is_umq = is_umq;
                 new_elem->value = payload;
-                insert_to_list(&my_bucket.buckets[i], new_elem, is_umq);
-                OB1_MATCHING_UNLOCK(&my_bucket.mutex);
+                insert_to_list(&my_bucket->buckets[i], new_elem, is_umq);
+                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                 return NULL; // inserted into queue without a match
 
             } else {
-                // dequeue
-                bucket_node *elem_to_dequeue = remove_from_list(&my_bucket.buckets[i]);
-                OB1_MATCHING_UNLOCK(&my_bucket.mutex);
+                // not empty and holds the other queue
+                // dequeue matching element
+                bucket_node *elem_to_dequeue = remove_from_list(&my_bucket->buckets[i]);
+                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                 // free element
                 void *retval = elem_to_dequeue->value;
                 to_memory_pool(map, elem_to_dequeue);
@@ -196,7 +197,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
 #endif
     assert(0 && "Not implemented yet");
 
-    OB1_MATCHING_UNLOCK(&my_bucket.mutex);
+    OB1_MATCHING_UNLOCK(&my_bucket->mutex);
     return 0;
 }
 

@@ -1,4 +1,7 @@
-// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I..  -I../3rd-party/openpmix/include matching_performance_map.c -Wno-format ../opal/class/.libs/opal_object.o ../opal/mca/threads/base/.libs/mutex.o ../opal/mca/threads/pthreads/.libs/threads_pthreads_module.o -lpthread
+// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I..
+// -I../3rd-party/openpmix/include matching_performance_map.c -Wno-format
+// ../opal/class/.libs/opal_object.o ../opal/mca/threads/base/.libs/mutex.o
+// ../opal/mca/threads/pthreads/.libs/threads_pthreads_module.o -lpthread
 /*
  * PRQ/UMQ Performance Test
  * Simulates message-arrival and receive-posted operations
@@ -13,12 +16,12 @@
 #include <time.h>
 
 // forward declare to remove problem with include ordering when including this internal header
-//struct custom_match_prq;
-//struct custom_match_umq;
-//typedef struct custom_match_prq custom_match_prq;
-//typedef struct custom_match_umq custom_match_umq;
+// struct custom_match_prq;
+// struct custom_match_umq;
+// typedef struct custom_match_prq custom_match_prq;
+// typedef struct custom_match_umq custom_match_umq;
 // dont use variable, just use locking for testing
-bool mca_pml_ob1_matching_protection =true;
+bool mca_pml_ob1_matching_protection = true;
 
 #define NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
 
@@ -102,29 +105,29 @@ int main(int argc, char **argv)
     for (long i = 0; i < num_ops; ++i) {
         int tag = tags[rand() % num_tags];
         int src = ranks[rand() % num_ranks];
-        void *payload = (void *) (uintptr_t) i;
+        void *payload = (void *) (uintptr_t) i + 1; // payload cannot be NULL
         if (rand() % 2 == 1) {
             // Operation 1: receive posted
             // search posted receives (PRQ)
-            void *recv_req = get_match_or_insert(matching_map,tag, src, payload, false);
+            void *recv_req = get_match_or_insert(matching_map, tag, src, payload, false);
             if (recv_req == NULL) {
                 prq_appends++;
                 pq_size++;
                 if (pq_size > pq_max)
                     pq_max = pq_size;
-            }else{
+            } else {
                 umq_dequeues++;
                 uq_size++;
             }
         } else {
             // Operation 2: message arrival
-            void *msg_found = get_match_or_insert(matching_map,tag, src, payload, true);
+            void *msg_found = get_match_or_insert(matching_map, tag, src, payload, true);
             if (msg_found == NULL) {
                 umq_appends++;
                 uq_size++;
                 if (uq_size > uq_max)
                     uq_max = uq_size;
-            }else{
+            } else {
                 prq_dequeues++;
                 pq_size++;
             }
@@ -143,5 +146,5 @@ int main(int argc, char **argv)
     free(ranks);
 
     match_map_destroy(matching_map);
-        return 0;
+    return 0;
 }
