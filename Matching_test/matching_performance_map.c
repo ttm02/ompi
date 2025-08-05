@@ -117,7 +117,7 @@ int main(int argc, char **argv)
                     pq_max = pq_size;
             } else {
                 umq_dequeues++;
-                uq_size++;
+                uq_size--;
             }
         } else {
             // Operation 2: message arrival
@@ -129,7 +129,7 @@ int main(int argc, char **argv)
                     uq_max = uq_size;
             } else {
                 prq_dequeues++;
-                pq_size++;
+                pq_size--;
             }
         }
     }
