@@ -38,7 +38,7 @@ typedef struct bucket_node {
     int tag;
     int peer;
     struct bucket_node *next;
-    bool is_umq;
+    bool is_recv;
     void *value;
 } bucket_node;
 
@@ -47,7 +47,7 @@ struct bucket {
     int peer;
     bucket_node *bucket_head;
     bucket_node *bucket_tail;
-    bool is_umq; // can only be changed while locked
+    bool is_recv; // can only be changed while locked
 };
 
 typedef struct bucket_collection {
@@ -70,7 +70,7 @@ typedef struct hashmap {
 } hashmap;
 
 // same name as used in other implementations
-typedef hashmap custom_match_prq;
+//typedef hashmap custom_match_prq;
 
 // simple hash function should suffice
 // TODO evaluate other hash functions?
@@ -78,7 +78,7 @@ static inline int hash_func(int tag, int peer)
 {
     return (tag + peer) % NUM_BUCKETS;
 }
-
+/*
 static inline int custom_match_prq_cancel(custom_match_prq *list, void *req)
 {
     assert(0 && "Not implemented");
@@ -87,7 +87,7 @@ static inline int custom_match_prq_cancel(custom_match_prq *list, void *req)
     // luckily we dont need to lock for that, as if another T matches in the mean time cancel just
     // does nothing
     return 0;
-}
+}*/
 
 static inline void to_memory_pool(hashmap *map, bucket_node *node)
 {
@@ -114,21 +114,21 @@ static inline bucket_node *get_bucket_node(hashmap *map)
 //  solution: lock the bucket if insterting element to empty list
 // problem: lock-free linked list require more effort e.g. an extra marker to mark node as invalid,
 // otherwise, other T can modify the node whie we are removing it even besser solution: encode
-// is_umq in first bit of ptr, as than it is actually part of the CAS if one wants to be 100%
+// is_recv in first bit of ptr, as than it is actually part of the CAS if one wants to be 100%
 // secure: the get_memory checks if malloc returns something where first bit of actual ptr is 0
 
-static inline void insert_to_list(struct bucket *my_bucket, bucket_node *new_elem, bool is_umq)
+static inline void insert_to_list(struct bucket *my_bucket, bucket_node *new_elem, bool is_recv)
 {
     assert(new_elem->next == NULL);
     if (my_bucket->bucket_head == NULL || my_bucket->bucket_tail == NULL) {
         // on empty list
         my_bucket->bucket_tail = new_elem;
         my_bucket->bucket_head = new_elem;
-        my_bucket->is_umq = is_umq; // update list status
+        my_bucket->is_recv = is_recv; // update list status
     } else {
         // list has at least one element
         assert(my_bucket->bucket_tail->next == NULL);
-        assert(my_bucket->is_umq == is_umq);
+        assert(my_bucket->is_recv == is_recv);
         my_bucket->bucket_tail->next = new_elem;
         my_bucket->bucket_tail = new_elem;
     }
@@ -145,14 +145,15 @@ static inline void *remove_from_list(struct bucket *my_bucket)
     return elem_to_dequeue;
 }
 
-// TODO can i force the compiler to instantiate a "templated" version where is_umq is template
+// TODO can i force the compiler to instantiate a "templated" version where is_recv is template
 // parameter?
 
 // returns the match (and removed matched from queue)
 // or inserts into the queue if no match and returns void
 // basically combining the different matching queues
-static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *payload, bool is_umq)
+static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *payload, bool is_recv)
 {
+    printf("access bucket %d (%d,%d,%d)\n",hash_func(tag, peer),tag,peer,is_recv);
     bucket_collection *my_bucket = &map->buckets[hash_func(tag, peer)];
     OB1_MATCHING_LOCK(&my_bucket->mutex);
 
@@ -166,15 +167,15 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
             // found correct bucket
 
             // if list empty or same mode: insert to queue
-            if (my_bucket->buckets[i].is_umq == is_umq
+            if (my_bucket->buckets[i].is_recv == is_recv
                 || my_bucket->buckets[i].bucket_head == NULL) {
                 bucket_node *new_elem = get_bucket_node(map);
                 new_elem->tag = tag;
                 new_elem->peer = peer;
                 new_elem->next = NULL;
-                new_elem->is_umq = is_umq;
+                new_elem->is_recv = is_recv;
                 new_elem->value = payload;
-                insert_to_list(&my_bucket->buckets[i], new_elem, is_umq);
+                insert_to_list(&my_bucket->buckets[i], new_elem, is_recv);
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                 return NULL; // inserted into queue without a match
 
@@ -195,20 +196,19 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
 #ifdef COUNT_COLLISIONS
     map->num_collisions++;
 #endif
-    //printf("Collision bucket %d\n",hash_func(tag, peer));
     bucket_node *prev_elem = NULL;
     bucket_node *elem = my_bucket->other_keys_bucket_head;
 
     while (elem != NULL) {
         if (elem->tag == tag && elem->peer == peer) {
             // found matching entry
-            if (elem->is_umq == is_umq) {
+            if (elem->is_recv == is_recv) {
                 // same queue: insert at end
                 bucket_node *new_elem = get_bucket_node(map);
                 new_elem->tag = tag;
                 new_elem->peer = peer;
                 new_elem->next = NULL;
-                new_elem->is_umq = is_umq;
+                new_elem->is_recv = is_recv;
                 new_elem->value = payload;
                 my_bucket->other_keys_bucket_tail->next = new_elem;
                 my_bucket->other_keys_bucket_tail = new_elem;
@@ -240,7 +240,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
     new_elem->tag = tag;
     new_elem->peer = peer;
     new_elem->next = NULL;
-    new_elem->is_umq = is_umq;
+    new_elem->is_recv = is_recv;
     new_elem->value = payload;
 
     if (my_bucket->other_keys_bucket_tail == NULL) {
@@ -255,7 +255,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
     return NULL;
 }
 
-static inline custom_match_prq *match_map_init()
+static inline hashmap *match_map_init()
 {
     hashmap *map = calloc(sizeof(hashmap), 1);
 
