@@ -104,7 +104,7 @@ int main(int argc, char **argv)
     for (long i = 0; i < num_ops; ++i) {
         int tag = tags[rand() % num_tags];
         int src = ranks[rand() % num_ranks];
-        void *payload = (void *) (uintptr_t) i;
+        void *payload = (void *) (uintptr_t) i+1; // not null palyoad
         if (rand() % 2 == 1) {
             // Operation 1: message arrival
             // search posted receives (PRQ)
