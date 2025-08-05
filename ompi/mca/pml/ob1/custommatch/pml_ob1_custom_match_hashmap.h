@@ -153,7 +153,7 @@ static inline void *remove_from_list(struct bucket *my_bucket)
 // basically combining the different matching queues
 static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *payload, bool is_recv)
 {
-    printf("access bucket %d (%d,%d,%d)\n",hash_func(tag, peer),tag,peer,is_recv);
+    //printf("access bucket %d (%d,%d,%d)\n",hash_func(tag, peer),tag,peer,is_recv);
     bucket_collection *my_bucket = &map->buckets[hash_func(tag, peer)];
     OB1_MATCHING_LOCK(&my_bucket->mutex);
 
@@ -233,7 +233,8 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                 return retval;
             }
         }
-        elem = elem->next;
+        prev_elem = elem;
+        elem = prev_elem->next;
     }
     // mo match found: insert at end (or on empty list)
     bucket_node *new_elem = get_bucket_node(map);
