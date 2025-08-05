@@ -193,12 +193,66 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
     }
     // multiple hash collisions
 #ifdef COUNT_COLLISIONS
-    __atomic_add_fetch(&map->num_collisions, 1, __ATOMIC_ACQ_REL);
+    map->num_collisions++;
 #endif
-    assert(0 && "Not implemented yet");
+    //printf("Collision bucket %d\n",hash_func(tag, peer));
+    bucket_node *prev_elem = NULL;
+    bucket_node *elem = my_bucket->other_keys_bucket_head;
 
+    while (elem != NULL) {
+        if (elem->tag == tag && elem->peer == peer) {
+            // found matching entry
+            if (elem->is_umq == is_umq) {
+                // same queue: insert at end
+                bucket_node *new_elem = get_bucket_node(map);
+                new_elem->tag = tag;
+                new_elem->peer = peer;
+                new_elem->next = NULL;
+                new_elem->is_umq = is_umq;
+                new_elem->value = payload;
+                my_bucket->other_keys_bucket_tail->next = new_elem;
+                my_bucket->other_keys_bucket_tail = new_elem;
+                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+                return NULL;
+            } else {
+                // match: dequeue
+                if (prev_elem != NULL) {
+                    prev_elem->next = elem->next;
+                } else {
+                    // first list elem
+                    my_bucket->other_keys_bucket_head = elem->next;
+                }
+                // last elem
+                if (my_bucket->other_keys_bucket_tail == elem) {
+                    my_bucket->other_keys_bucket_tail = prev_elem;
+                    // also works when list is emptied
+                }
+                void *retval = elem->value;
+                to_memory_pool(map, elem);
+                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+                return retval;
+            }
+        }
+        elem = elem->next;
+    }
+    // mo match found: insert at end (or on empty list)
+    bucket_node *new_elem = get_bucket_node(map);
+    new_elem->tag = tag;
+    new_elem->peer = peer;
+    new_elem->next = NULL;
+    new_elem->is_umq = is_umq;
+    new_elem->value = payload;
+
+    if (my_bucket->other_keys_bucket_tail == NULL) {
+        assert(my_bucket->other_keys_bucket_head == NULL);
+        my_bucket->other_keys_bucket_head = new_elem;
+        my_bucket->other_keys_bucket_tail = new_elem;
+    } else {
+        my_bucket->other_keys_bucket_tail->next = new_elem;
+        my_bucket->other_keys_bucket_tail = new_elem;
+    }
     OB1_MATCHING_UNLOCK(&my_bucket->mutex);
-    return 0;
+    return NULL;
 }
 
 static inline custom_match_prq *match_map_init()
@@ -218,6 +272,9 @@ static inline custom_match_prq *match_map_init()
 
 static inline void match_map_destroy(hashmap *map)
 {
+#ifdef COUNT_COLLISIONS
+    printf("Number of hash Collisions:%d\n", map->num_collisions);
+#endif
     OBJ_DESTRUCT(&map->mutex);
     for (int i = 0; i < NUM_BUCKETS; ++i) {
         OBJ_DESTRUCT(&map->buckets[i].mutex);
