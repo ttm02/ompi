@@ -69,8 +69,8 @@ static void mca_pml_ob1_comm_construct(mca_pml_ob1_comm_t* comm)
 #if !MCA_PML_OB1_CUSTOM_MATCH
     OBJ_CONSTRUCT(&comm->wild_receives, opal_list_t);
 #else
-    comm->prq = custom_match_prq_init();
-    comm->umq = custom_match_umq_init();
+    comm->prq = match_map_init();
+    //comm->umq = custom_match_umq_init();
 #endif
     OBJ_CONSTRUCT(&comm->matching_lock, opal_mutex_t);
     OBJ_CONSTRUCT(&comm->proc_lock, opal_mutex_t);
@@ -96,8 +96,8 @@ static void mca_pml_ob1_comm_destruct(mca_pml_ob1_comm_t* comm)
 #if !MCA_PML_OB1_CUSTOM_MATCH
     OBJ_DESTRUCT(&comm->wild_receives);
 #else
-    custom_match_prq_destroy(comm->prq);
-    custom_match_umq_destroy(comm->umq);
+    match_map_destroy(comm->prq);
+    //custom_match_umq_destroy(comm->umq);
 #endif
     OBJ_DESTRUCT(&comm->matching_lock);
     OBJ_DESTRUCT(&comm->proc_lock);

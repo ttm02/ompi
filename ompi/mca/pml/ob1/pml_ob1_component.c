@@ -157,7 +157,8 @@ static int mca_pml_ob1_get_unex_msgq_size (const struct mca_base_pvar_t *pvar, v
         pml_proc = pml_comm->procs[i];
         if (pml_proc) {
 #if MCA_PML_OB1_CUSTOM_MATCH
-            values[i] = custom_match_umq_size(pml_comm->umq); // TODO: given the structure of custom match this does not make sense,
+            values[i]=1; // TODO why is this needed? only for statistics?
+            //values[i] = custom_match_umq_size(pml_comm->umq); // TODO: given the structure of custom match this does not make sense,
                                                      //       as we only have one set of queues.
 #else
             values[i] = opal_list_get_size (&pml_proc->unexpected_frags);
@@ -184,7 +185,8 @@ static int mca_pml_ob1_get_posted_recvq_size (const struct mca_base_pvar_t *pvar
 
         if (pml_proc) {
 #if MCA_PML_OB1_CUSTOM_MATCH
-            values[i] = custom_match_prq_size(pml_comm->prq); // TODO: given the structure of custom match this does not make sense,
+            values[i]=1; // TODO why is this needed? only for statistics?
+            //values[i] = custom_match_prq_size(pml_comm->prq); // TODO: given the structure of custom match this does not make sense,
                                                      //       as we only have one set of queues.
 #else
             values[i] = opal_list_get_size (&pml_proc->specific_receives);

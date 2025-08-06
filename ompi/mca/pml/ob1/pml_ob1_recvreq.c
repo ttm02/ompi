@@ -1134,6 +1134,7 @@ static inline void append_recv_req_to_queue(opal_list_t *queue,
  *  function has to be called with the communicator matching lock held.
 */
 
+/*
 #if MCA_PML_OB1_CUSTOM_MATCH
 static mca_pml_ob1_recv_frag_t*
 recv_req_match_specific_proc( const mca_pml_ob1_recv_request_t *req,
@@ -1179,12 +1180,14 @@ recv_req_match_specific_proc( const mca_pml_ob1_recv_request_t *req,
                                              hold_prev, hold_elem, hold_index);
 #endif
 }
+*/
 
 /*
  * this routine is used to try and match a wild posted receive - where
  * wild is determined by the value assigned to the source process
 */
 #if MCA_PML_OB1_CUSTOM_MATCH
+/*
 static mca_pml_ob1_recv_frag_t*
 recv_req_match_wild( mca_pml_ob1_recv_request_t* req,
                      mca_pml_ob1_comm_proc_t **p,
@@ -1215,6 +1218,7 @@ recv_req_match_wild( mca_pml_ob1_recv_request_t* req,
     }
 
     return frag;
+    */
 #else
 
     /*
@@ -1253,7 +1257,7 @@ recv_req_match_wild( mca_pml_ob1_recv_request_t* req,
     *p = NULL;
     return NULL;
 #endif
-}
+//}
 
 
 void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
@@ -1264,9 +1268,9 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
     mca_pml_ob1_recv_frag_t* frag;
     mca_pml_ob1_hdr_t* hdr;
 #if MCA_PML_OB1_CUSTOM_MATCH
-    custom_match_umq_node* hold_prev;
-    custom_match_umq_node* hold_elem;
-    int hold_index;
+    //custom_match_umq_node* hold_prev;
+    //custom_match_umq_node* hold_elem;
+    //int hold_index;
 #else
     opal_list_t *queue;
 #endif
@@ -1319,8 +1323,11 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
 
     /* attempt to match posted recv */
     if(req->req_recv.req_base.req_peer == OMPI_ANY_SOURCE) {// disabled branch per assertion
+
 #if MCA_PML_OB1_CUSTOM_MATCH
-        frag = recv_req_match_wild(req, &proc, &hold_prev, &hold_elem, &hold_index);// assume no lock  and not called
+        printf("ERROR: Matching algo does not support wildcards\n");
+        exit(-1);
+        //frag = recv_req_match_wild(req, &proc, &hold_prev, &hold_elem, &hold_index);// assume no lock  and not called
 #else
         frag = recv_req_match_wild(req, &proc);
         queue = &ob1_comm->wild_receives;
@@ -1341,7 +1348,11 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
         proc = mca_pml_ob1_peer_lookup (comm, req->req_recv.req_base.req_peer);
         req->req_recv.req_base.req_proc = proc->ompi_proc;
 #if MCA_PML_OB1_CUSTOM_MATCH
-        frag = recv_req_match_specific_proc(req, proc, &hold_prev, &hold_elem, &hold_index);// assume no lock
+        //frag = recv_req_match_specific_proc(req, proc, &hold_prev, &hold_elem, &hold_index);// assume no lock
+        frag = get_match_or_insert( req->req_recv.req_base.req_comm->c_pml_comm->prq,
+                                             req->req_recv.req_base.req_tag,
+                                             req->req_recv.req_base.req_peer,req,false);
+
 #else
         frag = recv_req_match_specific_proc(req, proc);
         queue = &proc->specific_receives;
@@ -1358,9 +1369,10 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
         if(OPAL_LIKELY(req->req_recv.req_base.req_type != MCA_PML_REQUEST_IPROBE &&
                        req->req_recv.req_base.req_type != MCA_PML_REQUEST_IMPROBE))
 #if MCA_PML_OB1_CUSTOM_MATCH
-            custom_match_prq_append(ob1_comm->prq, req,
-                                    req->req_recv.req_base.req_tag,
-                                    req->req_recv.req_base.req_peer);// assume no lock
+            // already done above
+        //    custom_match_prq_append(ob1_comm->prq, req,
+        //                            req->req_recv.req_base.req_tag,
+        //                            req->req_recv.req_base.req_peer);// assume no lock
 #else
             append_recv_req_to_queue(queue, req);
 #endif
@@ -1382,7 +1394,8 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
                                     &(req->req_recv.req_base), PERUSE_RECV);// no lock
 
 #if MCA_PML_OB1_CUSTOM_MATCH
-            custom_match_umq_remove_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq, hold_prev, hold_elem, hold_index);// assume no lock
+// already done before
+            //custom_match_umq_remove_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq, hold_prev, hold_elem, hold_index);// assume no lock
 #else
             opal_list_remove_item(&proc->unexpected_frags,
                                   (opal_list_item_t*)frag);
@@ -1418,7 +1431,8 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
                restarted with this request during mrecv */
 
 #if MCA_PML_OB1_CUSTOM_MATCH
-            custom_match_umq_remove_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq, hold_prev, hold_elem, hold_index);// assume no lock
+            // already done above
+            // custom_match_umq_remove_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq, hold_prev, hold_elem, hold_index);// assume no lock
 #else
             opal_list_remove_item(&proc->unexpected_frags,
                                   (opal_list_item_t*)frag);
