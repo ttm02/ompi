@@ -91,20 +91,24 @@ static inline int custom_match_prq_cancel(custom_match_prq *list, void *req)
 
 static inline void to_memory_pool(hashmap *map, bucket_node *node)
 {
+    OB1_MATCHING_LOCK(&map->mutex);
     node->next = map->memory_pool;
     map->memory_pool = node;
+    OB1_MATCHING_UNLOCK(&map->mutex);
 }
 
 static inline bucket_node *get_bucket_node(hashmap *map)
 {
     // fetch from memory pool or allocate if pool is empty
-
+    OB1_MATCHING_LOCK(&map->mutex);
     if (map->memory_pool != NULL) {
         bucket_node *node = map->memory_pool;
         map->memory_pool = node->next;
         node->next = NULL;
+        OB1_MATCHING_UNLOCK(&map->mutex);
         return node;
     } else {
+        OB1_MATCHING_UNLOCK(&map->mutex);
         return calloc(1, sizeof(bucket_node));
     }
 }
