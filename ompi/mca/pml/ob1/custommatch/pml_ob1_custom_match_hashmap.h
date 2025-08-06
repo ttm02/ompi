@@ -74,7 +74,7 @@ typedef hashmap custom_match_prq;
 
 // simple hash function should suffice
 // TODO evaluate other hash functions?
-static inline int hash_func(int tag, int peer)
+static inline int matching_hash_func(int tag, int peer)
 {
     return (tag + peer) % NUM_BUCKETS;
 }
@@ -159,7 +159,7 @@ static inline void *remove_from_list(struct bucket *my_bucket)
 static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *payload, bool is_recv)
 {
     //printf("access bucket %d (%d,%d,%d)\n",hash_func(tag, peer),tag,peer,is_recv);
-    bucket_collection *my_bucket = &map->buckets[hash_func(tag, peer)];
+    bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
     OB1_MATCHING_LOCK(&my_bucket->mutex);
 
     for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
