@@ -70,7 +70,7 @@ typedef struct hashmap {
 } hashmap;
 
 // same name as used in other implementations
-//typedef hashmap custom_match_prq;
+typedef hashmap custom_match_prq;
 
 // simple hash function should suffice
 // TODO evaluate other hash functions?
@@ -109,9 +109,14 @@ static inline bucket_node *get_bucket_node(hashmap *map)
     }
 }
 
-// TODO there is still a threading problem with this design
-//  while inserting into the list, another T can swap the list status
-//  solution: lock the bucket if insterting element to empty list
+static inline void custom_match_prq_cancel(hashmap* map, void* payload)
+{
+    assert(0 && "Not implemented");
+    //TODO implement
+    // most costly operation: need to search all buckets ontul found element or everything was searched
+}
+
+// Notes for a lock-free design:
 // problem: lock-free linked list require more effort e.g. an extra marker to mark node as invalid,
 // otherwise, other T can modify the node whie we are removing it even besser solution: encode
 // is_recv in first bit of ptr, as than it is actually part of the CAS if one wants to be 100%
@@ -256,7 +261,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
     return NULL;
 }
 
-static inline hashmap *match_map_init()
+static inline hashmap *match_map_init(void)
 {
     hashmap *map = calloc(sizeof(hashmap), 1);
 

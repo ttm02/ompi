@@ -40,7 +40,8 @@
 #define MCA_PML_OB1_CUSTOM_MATCH 1
 
 #if MCA_PML_OB1_CUSTOM_MATCHING == MCA_PML_OB1_CUSTOM_MATCHING_LINKEDLIST
-#include "pml_ob1_custom_match_linkedlist.h"
+//#include "pml_ob1_custom_match_linkedlist.h"
+#include "pml_ob1_custom_match_hashmap.h"
 #elif MCA_PML_OB1_CUSTOM_MATCHING == MCA_PML_OB1_CUSTOM_MATCHING_ARRAYS
 #include "pml_ob1_custom_match_arrays.h"
 #elif MCA_PML_OB1_CUSTOM_MATCHING == MCA_PML_OB1_CUSTOM_MATCHING_FUZZY_BYTE

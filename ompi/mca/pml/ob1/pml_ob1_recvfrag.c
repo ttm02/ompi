@@ -89,7 +89,7 @@ append_frag_to_list(opal_list_t *queue, mca_btl_base_module_t *btl,
 }
 
 #if MCA_PML_OB1_CUSTOM_MATCH
-
+/*
 static void
 append_frag_to_umq(custom_match_umq *queue, mca_btl_base_module_t *btl,
                    const mca_pml_ob1_match_hdr_t *hdr, const mca_btl_base_segment_t *segments,
@@ -101,7 +101,7 @@ append_frag_to_umq(custom_match_umq *queue, mca_btl_base_module_t *btl,
   }
   custom_match_umq_append(queue, hdr->hdr_tag, hdr->hdr_src, frag);
 }
-
+*/
 #endif
 
 
@@ -889,10 +889,11 @@ static inline mca_pml_ob1_recv_request_t* get_next_posted_recv(
     return (mca_pml_ob1_recv_request_t*)i;
 }
 
-static mca_pml_ob1_recv_request_t *match_incomming(const mca_pml_ob1_match_hdr_t *hdr,
-                                                   mca_pml_ob1_comm_t *comm,
-                                                   mca_pml_ob1_comm_proc_t *proc)
-{
+
+//static mca_pml_ob1_recv_request_t *match_incomming(const mca_pml_ob1_match_hdr_t *hdr,
+//                                                   mca_pml_ob1_comm_t *comm,
+//                                                   mca_pml_ob1_comm_proc_t *proc)
+//{
 #if !MCA_PML_OB1_CUSTOM_MATCH
     mca_pml_ob1_recv_request_t *specific_recv, *wild_recv;
     mca_pml_sequence_t wild_recv_seq, specific_recv_seq;
@@ -937,9 +938,9 @@ static mca_pml_ob1_recv_request_t *match_incomming(const mca_pml_ob1_match_hdr_t
 
     return NULL;
 #else
-    return custom_match_prq_find_dequeue_verify(comm->prq, hdr->hdr_tag, hdr->hdr_src); // assume no lock needed
+//    return custom_match_prq_find_dequeue_verify(comm->prq, hdr->hdr_tag, hdr->hdr_src); // assume no lock needed
 #endif
-}
+//}
 
 #if !MCA_PML_OB1_CUSTOM_MATCH
 static mca_pml_ob1_recv_request_t *match_incomming_no_any_source (const mca_pml_ob1_match_hdr_t *hdr,
@@ -979,9 +980,17 @@ static mca_pml_ob1_recv_request_t *match_one (mca_btl_base_module_t *btl,
     mca_pml_ob1_recv_request_t *match; // dont need lock here
     mca_pml_ob1_comm_t *comm = (mca_pml_ob1_comm_t *)comm_ptr->c_pml_comm; // dont need lock here
 
-    do {
+    do { //TODO why do i need this loop? I will go out of the loop on first try anyway either due to match or return NULL on no match
 #if MCA_PML_OB1_CUSTOM_MATCH
-        match = match_incomming(hdr, comm, proc); // assume no lock (as the queue locks itself if needed)
+        //match = match_incomming(hdr, comm, proc); // assume no lock (as the queue locks itself if needed)
+
+        if(NULL == frag) {
+            MCA_PML_OB1_RECV_FRAG_ALLOC(frag);
+            MCA_PML_OB1_RECV_FRAG_INIT(frag, hdr, segments, num_segments, btl);
+        }
+        match = get_match_or_insert(comm->prq, hdr->hdr_tag, hdr->hdr_src,frag,true);
+        // TODO: do I need to destroy frag on match?
+
 #else
         if (!OMPI_COMM_CHECK_ASSERT_NO_ANY_SOURCE (comm_ptr)) {
             match = match_incomming(hdr, comm, proc);
@@ -1030,8 +1039,8 @@ static mca_pml_ob1_recv_request_t *match_one (mca_btl_base_module_t *btl,
 
         /* if no match found, place on unexpected queue */
 #if MCA_PML_OB1_CUSTOM_MATCH
-        append_frag_to_umq(comm->umq, btl, hdr, segments,
-                            num_segments, frag); // assume no lock
+        // was done in one go by above operation
+       // append_frag_to_umq(comm->umq, btl, hdr, segments, num_segments, frag); // assume no lock
 #else
         append_frag_to_list(&proc->unexpected_frags, btl, hdr, segments,
                             num_segments, frag);

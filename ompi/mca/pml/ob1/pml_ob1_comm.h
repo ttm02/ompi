@@ -74,7 +74,7 @@ struct mca_pml_comm_t {
     size_t last_probed;
 #if MCA_PML_OB1_CUSTOM_MATCH
     custom_match_prq *prq;
-    custom_match_umq *umq;
+    //custom_match_umq *umq;
 #endif
 };
 typedef struct mca_pml_comm_t mca_pml_ob1_comm_t;
