@@ -9,6 +9,7 @@
  */
 #include <assert.h>
 #include <getopt.h>
+#include <omp.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -87,8 +88,6 @@ int main(int argc, char **argv)
             break;
         }
     }
-    // random seed
-    srand((unsigned) time(NULL));
 
     int *tags = get_value_pool(num_tags, tag_pool_range);
     int *ranks = get_value_pool(num_ranks, rank_pool_range);
@@ -100,13 +99,31 @@ int main(int argc, char **argv)
     int pq_size = 0, uq_size = 0;
     int pq_max = 0, uq_max = 0;
 
+    int num_t = 1;
+#pragma omp parallel
+    {
+#pragma omp master
+        {
+            num_t = omp_get_num_threads();
+        }
+    }
+
+    // random seed
+    srand((unsigned) time(NULL));
+    unsigned int *srand_buffer = malloc(sizeof(unsigned int) * num_t);
+    for (int i = 0; i < num_t; ++i) {
+        srand_buffer[i] = rand(); // each T has a different seed
+    }
+
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
+#pragma omp parallel for reduction(+ : prq_appends, prq_dequeues, umq_appends, umq_dequeues) \
+    firstprivate(pq_size, uq_size, pq_max, uq_max)
     for (long i = 0; i < num_ops; ++i) {
-        int tag = tags[rand() % num_tags];
-        int src = ranks[rand() % num_ranks];
+        const int tag = tags[rand_r(&srand_buffer[omp_get_thread_num()]) % num_tags];
+        const int src = ranks[rand_r(&srand_buffer[omp_get_thread_num()]) % num_ranks];
         void *payload = (void *) (uintptr_t) i + 1; // payload cannot be NULL
-        if (rand() % 2 == 1) {
+        if (rand_r(&srand_buffer[omp_get_thread_num()]) % 2 == 1) {
             // Operation 1: receive posted
             // search posted receives (PRQ)
             void *recv_req = get_match_or_insert(matching_map, tag, src, payload, false);
@@ -144,6 +161,7 @@ int main(int argc, char **argv)
 
     free(tags);
     free(ranks);
+    free(srand_buffer);
 
     match_map_destroy(matching_map);
     return 0;
