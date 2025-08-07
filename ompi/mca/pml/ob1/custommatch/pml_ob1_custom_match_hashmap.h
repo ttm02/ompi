@@ -119,6 +119,10 @@ static inline bucket_node *get_bucket_node(hashmap *map)
 
 static inline void custom_match_prq_cancel(hashmap* map, void* payload)
 {
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+    printf("custom_match_prq_cancel - list: %p req: %p\n", map, payload);
+#endif
+
     // most costly operation: need to search all buckets until found element or everything was
     // searched
     for (int i = 0; i < NUM_BUCKETS; ++i) {
@@ -292,9 +296,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                     my_bucket->other_keys_bucket_tail = prev_elem;
                     // also works when list is emptied
                 }
+                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                 void *retval = elem->value;
                 to_memory_pool(map, elem);
-                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                 return retval;
             }
         }
