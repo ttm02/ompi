@@ -14,9 +14,11 @@
 #ifndef PML_OB1_CUSTOM_MATCH_HASHMAP_H
 #define PML_OB1_CUSTOM_MATCH_HASHMAP_H
 
+#include "../pml_ob1.h"
 #include "../../../../../opal/include/opal/prefetch.h"
 #include "../pml_ob1_recvfrag.h"
 #include "../pml_ob1_recvreq.h"
+
 
 #include <assert.h>
 #include <stdbool.h>
