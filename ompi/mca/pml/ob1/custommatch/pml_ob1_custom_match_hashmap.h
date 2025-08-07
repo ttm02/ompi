@@ -203,7 +203,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
     }
     // multiple hash collisions
 #ifdef COUNT_COLLISIONS
-    map->num_collisions++;
+    __atomic_add_fetch(&map->num_collisions,1,__ATOMIC_ACQ_REL);
 #endif
     bucket_node *prev_elem = NULL;
     bucket_node *elem = my_bucket->other_keys_bucket_head;
