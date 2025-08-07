@@ -119,9 +119,61 @@ static inline bucket_node *get_bucket_node(hashmap *map)
 
 static inline void custom_match_prq_cancel(hashmap* map, void* payload)
 {
-    assert(0 && "Not implemented");
-    //TODO implement
-    // most costly operation: need to search all buckets ontul found element or everything was searched
+    // most costly operation: need to search all buckets until found element or everything was
+    // searched
+    for (int i = 0; i < NUM_BUCKETS; ++i) {
+        bucket_collection *my_bucket = &map->buckets[i];
+        OB1_MATCHING_LOCK(&my_bucket->mutex);
+        for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
+            bucket_node* prev_elem=NULL;
+            bucket_node* elem = my_bucket->buckets[j].bucket_head;
+            while (elem!=NULL) {
+                if (elem->value==payload) {
+                    // found elem
+                    if (prev_elem==NULL) {
+                        my_bucket->buckets[j].bucket_head = elem->next;
+                    }else {
+                        prev_elem->next=elem->next;
+                    }
+                        if (elem->next == NULL) {
+                            // removal of last element
+                            my_bucket->buckets[j].bucket_tail = NULL;
+                        }
+                    OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+                    to_memory_pool(map, elem);
+                    return;
+                }
+                prev_elem = elem;
+                elem = prev_elem->next;
+            }
+        }
+
+
+        bucket_node* prev_elem=NULL;
+        bucket_node* elem = my_bucket->other_keys_bucket_head;
+        while (elem!=NULL) {
+            if (elem->value==payload) {
+                // found elem
+                if (prev_elem==NULL) {
+                    my_bucket->other_keys_bucket_head = elem->next;
+                }else {
+                    prev_elem->next=elem->next;
+                }
+                if (elem->next == NULL) {
+                    // removal of last element
+                    my_bucket->other_keys_bucket_tail = NULL;
+                }
+                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+                to_memory_pool(map, elem);
+                return;
+            }
+            prev_elem = elem;
+            elem = prev_elem->next;
+        }
+        // not in this bucket
+        OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+    }
+
 }
 
 // Notes for a lock-free design:
