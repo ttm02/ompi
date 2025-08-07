@@ -78,7 +78,9 @@ typedef hashmap custom_match_prq;
 // TODO evaluate other hash functions?
 static inline int matching_hash_func(int tag, int peer)
 {
-    return (tag + peer) % NUM_BUCKETS;
+    int mask = 0x7FFFFFFF; // only sign bit not set
+    // tag may be negative on some internal communication
+    return ((tag& mask) + peer) % NUM_BUCKETS;
 }
 /*
 static inline int custom_match_prq_cancel(custom_match_prq *list, void *req)
@@ -164,7 +166,7 @@ static inline void *remove_from_list(struct bucket *my_bucket)
 // basically combining the different matching queues
 static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *payload, bool is_recv)
 {
-    //printf("access bucket %d (%d,%d,%d)\n",hash_func(tag, peer),tag,peer,is_recv);
+    //printf("access bucket %d (%d,%d,%d)\n",matching_hash_func(tag, peer),tag,peer,is_recv);
     bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
     OB1_MATCHING_LOCK(&my_bucket->mutex);
 
