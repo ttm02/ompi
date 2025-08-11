@@ -144,6 +144,10 @@ static inline void custom_match_prq_cancel(hashmap* map, void* payload)
                             my_bucket->buckets[j].bucket_tail = NULL;
                         }
                     OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+                    printf("custom_match_prq_cancel - cancelled (%d,%d) list: %p req: %p\n", elem->tag,elem->peer,map, payload);
+#endif
+
                     to_memory_pool(map, elem);
                     return;
                 }
@@ -168,6 +172,10 @@ static inline void custom_match_prq_cancel(hashmap* map, void* payload)
                     my_bucket->other_keys_bucket_tail = NULL;
                 }
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+                printf("custom_match_prq_cancel - cancelled (%d,%d) list: %p req: %p\n", elem->tag,elem->peer,map, payload);
+#endif
+
                 to_memory_pool(map, elem);
                 return;
             }
@@ -177,6 +185,10 @@ static inline void custom_match_prq_cancel(hashmap* map, void* payload)
         // not in this bucket
         OB1_MATCHING_UNLOCK(&my_bucket->mutex);
     }
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+    printf("custom_match_prq_cancel - not in list anymore list: %p req: %p\n", map, payload);
+#endif
+
 
 }
 
@@ -222,6 +234,9 @@ static inline void *remove_from_list(struct bucket *my_bucket)
 // basically combining the different matching queues
 static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *payload, bool is_recv)
 {
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+    printf("try to match (%d,%d) - list: %p req: %p\n",tag,peer, map, payload);
+#endif
     //printf("access bucket %d (%d,%d,%d)\n",matching_hash_func(tag, peer),tag,peer,is_recv);
     bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
     OB1_MATCHING_LOCK(&my_bucket->mutex);
@@ -246,6 +261,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                 new_elem->value = payload;
                 insert_to_list(&my_bucket->buckets[i], new_elem, is_recv);
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+                printf("add (%d,%d) to queue%d - list: %p req: %p\n",tag,peer, is_recv, map, payload);
+#endif
                 return NULL; // inserted into queue without a match
 
             } else {
@@ -253,6 +271,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                 // dequeue matching element
                 bucket_node *elem_to_dequeue = remove_from_list(&my_bucket->buckets[i]);
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+                printf("matched (%d,%d) from queue%d - list: %p req: %p to:%p\n",tag,peer, !is_recv, map, payload,elem_to_dequeue->value);
+#endif
                 // free element
                 void *retval = elem_to_dequeue->value;
                 to_memory_pool(map, elem_to_dequeue);
@@ -282,6 +303,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                 my_bucket->other_keys_bucket_tail->next = new_elem;
                 my_bucket->other_keys_bucket_tail = new_elem;
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+                printf("add (%d,%d) to queue%d - list: %p req: %p\n",tag,peer, is_recv, map, payload);
+#endif
                 return NULL;
             } else {
                 // match: dequeue
@@ -298,6 +322,10 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                 }
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                 void *retval = elem->value;
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+                printf("matched (%d,%d) from queue%d - list: %p req: %p to:%p\n",tag,peer, !is_recv, map, payload,retval);
+#endif
+
                 to_memory_pool(map, elem);
                 return retval;
             }
@@ -322,6 +350,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
         my_bucket->other_keys_bucket_tail = new_elem;
     }
     OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+    printf("add (%d,%d) to queue%d - list: %p req: %p\n",tag,peer, is_recv, map, payload);
+#endif
     return NULL;
 }
 
