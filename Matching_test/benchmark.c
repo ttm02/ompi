@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
     int opt;
     while ((opt = getopt(argc, argv, "t:n:s:")) != -1) {
         switch (opt) {
-            case 't': nthreads = atoi(optarg); break;
+            case 't': nthreads = atoi(optarg); break;   
             case 'n': iterations = atol(optarg); break;
             case 's': msg_size = atoi(optarg); break;
             default:
@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
   
     // Synchronize before starting
 //    MPI_Barrier(MPI_COMM_WORLD);
-//TODO barreir leads to wildcard recv???
+//TODO barrier leads to wildcard recv???
 
     double t0 = MPI_Wtime();
     #pragma omp parallel
