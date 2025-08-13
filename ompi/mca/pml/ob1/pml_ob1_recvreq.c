@@ -1344,7 +1344,7 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
             prepare_recv_req_converter(req);
         }
 #endif  /* !OPAL_ENABLE_HETEROGENEOUS_SUPPORT */
-    } else {
+    } else { // no wildcard
         // will acquire and release the lock if it needs to - but usually only does a lookup
         proc = mca_pml_ob1_peer_lookup (comm, req->req_recv.req_base.req_peer);
         req->req_recv.req_base.req_proc = proc->ompi_proc;

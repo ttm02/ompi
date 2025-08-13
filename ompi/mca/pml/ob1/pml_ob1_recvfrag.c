@@ -127,12 +127,14 @@ void ompi_pml_ob1_append_frag_to_ordered_list (mca_pml_ob1_recv_frag_t **queue,
     frag->super.super.opal_list_prev = (opal_list_item_t*)frag;
     frag->range = NULL;
 
+    // could be an atomic CAS
     if (NULL == *queue) {  /* no pending fragments yet */
-        *queue = frag;// atomic update
+        //*queue = frag;// atomic update
+        __atomic_store_n(queue,frag,__ATOMIC_RELAXED);// happens before established by lock
         return;
     }
     // lock
-    prior = *queue;
+    prior = *queue;// no need for atomic read: we hold the lock
     assert(hdr->hdr_seq != prior->hdr.hdr_match.hdr_seq);
 
     /* The hdr_seq being 16 bits long it can rollover rather quickly. We need to
@@ -189,8 +191,10 @@ void ompi_pml_ob1_append_frag_to_ordered_list (mca_pml_ob1_recv_frag_t **queue,
 
     /* if the newly added element is closer to the next expected sequence mark it so */
     if( parent->hdr.hdr_match.hdr_seq >= seq )
-        if( abs(parent->hdr.hdr_match.hdr_seq - seq) < abs((*queue)->hdr.hdr_match.hdr_seq - seq))
-            *queue = parent;
+        if( abs(parent->hdr.hdr_match.hdr_seq - seq) < abs((*queue)->hdr.hdr_match.hdr_seq - seq)) {
+            //*queue = parent;
+            __atomic_store_n(queue,parent,__ATOMIC_RELAXED);
+        }
 
  merge_ranges:
     /* is the next hdr_seq the increasing next one ? */
@@ -225,8 +229,10 @@ void ompi_pml_ob1_append_frag_to_ordered_list (mca_pml_ob1_recv_frag_t **queue,
             next->super.super.opal_list_prev->opal_list_next = (opal_list_item_t*)parent->range;
             next->super.super.opal_list_prev = (opal_list_item_t*)frag;
         }
-        if( next == *queue )
-            *queue = parent;
+        if( next == *queue ) {
+            //*queue = parent;
+            __atomic_store_n(queue,parent,__ATOMIC_RELAXED);
+        }
     }
     // unlock
 }
@@ -238,7 +244,7 @@ static mca_pml_ob1_recv_frag_t*
 remove_head_from_ordered_list(mca_pml_ob1_recv_frag_t** queue) // TODO use matching lock as a parameter to lock if necessary
 {
     // additional performance optimization possible if < 10 elements: no use of ranges, to avoid locking?
-    mca_pml_ob1_recv_frag_t* frag = __atomic_load_n(queue, __ATOMIC_ACQUIRE);
+    mca_pml_ob1_recv_frag_t* frag = __atomic_load_n(queue, __ATOMIC_RELAXED);
     /* queue is empty, nothing to see. */
     if( NULL == frag )
         return NULL; // no lock needed
@@ -247,11 +253,12 @@ remove_head_from_ordered_list(mca_pml_ob1_recv_frag_t** queue) // TODO use match
         if( frag->super.super.opal_list_next == (opal_list_item_t*)frag ) {
             /* head points to itself means it is the only
              * one in this queue. We set the new head to NULL */
-            *queue = NULL; // need to be atomic but no need to lock
+            // *queue = NULL; // need to be atomic but no need to lock
+            __atomic_store_n(queue,NULL,__ATOMIC_RELAXED);
         } else {
             // lock
             /* make the next one a new head. */
-            __atomic_store_n(queue,(mca_pml_ob1_recv_frag_t*)frag->super.super.opal_list_next,__ATOMIC_RELEASE);
+            __atomic_store_n(queue,(mca_pml_ob1_recv_frag_t*)frag->super.super.opal_list_next,__ATOMIC_RELAXED);
             //*queue = (mca_pml_ob1_recv_frag_t*)frag->super.super.opal_list_next;
             frag->super.super.opal_list_next->opal_list_prev = frag->super.super.opal_list_prev;
             frag->super.super.opal_list_prev->opal_list_next = frag->super.super.opal_list_next;
@@ -262,7 +269,7 @@ remove_head_from_ordered_list(mca_pml_ob1_recv_frag_t** queue) // TODO use match
         /* head has range */
         mca_pml_ob1_recv_frag_t* range = frag->range;
         frag->range = NULL;
-        __atomic_store_n(queue,(mca_pml_ob1_recv_frag_t*)range,__ATOMIC_RELEASE);
+        __atomic_store_n(queue,(mca_pml_ob1_recv_frag_t*)range,__ATOMIC_RELAXED);
         //*queue = (mca_pml_ob1_recv_frag_t*)range;
         if( range->super.super.opal_list_next == (opal_list_item_t*)range ) {
             /* the range has no next element */
@@ -450,10 +457,11 @@ int mca_pml_ob1_revoke_comm( struct ompi_communicator_t* ompi_comm, bool coll_on
 
 mca_pml_ob1_recv_frag_t *ompi_pml_ob1_check_cantmatch_for_match (mca_pml_ob1_comm_proc_t *proc,opal_mutex_t* matching_lock)
 {
+    //TODO is __ATOMIC_RELAXED sufficient here, as teh lock will assert a happend before relation if necessary?
     mca_pml_ob1_recv_frag_t *frag = __atomic_load_n(&proc->frags_cant_match,__ATOMIC_ACQUIRE);
 
     if( (NULL != frag) && (frag->hdr.hdr_match.hdr_seq == __atomic_load_n(&proc->expected_sequence,__ATOMIC_ACQUIRE) )) {
-        OB1_MATCHING_LOCK(matching_lock);
+        OB1_MATCHING_LOCK(matching_lock);// list is guarded by lock
         mca_pml_ob1_recv_frag_t * result =remove_head_from_ordered_list(&proc->frags_cant_match);
         OB1_MATCHING_UNLOCK(matching_lock);
         return result;
@@ -645,7 +653,7 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
      * MUST be called with communicator lock and will RELEASE the lock. This is
      * not ideal but it is better for the performance.
      */
-    if(NULL != proc->frags_cant_match) {
+    if(NULL != __atomic_load_n(&proc->frags_cant_match,__ATOMIC_RELAXED)) {
         mca_pml_ob1_recv_frag_t* frag;
 
 
@@ -674,16 +682,30 @@ int mca_pml_ob1_merge_cant_match( ompi_communicator_t * ompi_comm )
 
 
     for (uint32_t i = 0; i < pml_comm->num_procs; i++) {
-        if ((NULL == (proc = pml_comm->procs[i])) || (NULL != proc->frags_cant_match)) {
+        proc = __atomic_load_n(&pml_comm->procs[i],__ATOMIC_RELAXED);
+        if (proc==NULL) {
             continue;
         }
+        /*if ((NULL == (proc = pml_comm->procs[i])) || (NULL != __atomic_load_n(&proc->frags_cant_match,__ATOMIC_RELAXED)) {
+            continue;
+        }*/
+        //lock to ensure no Thread is currently updating the list
+
+        OB1_MATCHING_LOCK(&pml_comm->matching_lock);
+        frags_cant_match = __atomic_exchange_n(&proc->frags_cant_match,NULL,__ATOMIC_ACQ_REL);
+        // we can unlock here, other T will build a new list while we process the old one
+        OB1_MATCHING_UNLOCK(&pml_comm->matching_lock);
+
+        if (frags_cant_match==NULL){
+        continue;}
 
         /* Acquire all cant_match frags from the peer */
         frags_cant_match = proc->frags_cant_match;
         proc->frags_cant_match = NULL;
-        OB1_MATCHING_LOCK(&pml_comm->matching_lock);
+        // this time we dont need the lock, as we have set the list to NULL
+        //OB1_MATCHING_LOCK(&pml_comm->matching_lock);
         frag = remove_head_from_ordered_list(&frags_cant_match);
-        OB1_MATCHING_UNLOCK(&pml_comm->matching_lock);
+        //OB1_MATCHING_UNLOCK(&pml_comm->matching_lock);
         while(NULL != frag) {
             /* mca_pml_ob1_recv_frag_match_proc() will release the lock. */
             mca_pml_ob1_recv_frag_match_proc(frag->btl, ompi_comm, proc,
