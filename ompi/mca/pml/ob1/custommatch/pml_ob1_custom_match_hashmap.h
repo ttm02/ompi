@@ -95,13 +95,13 @@ static inline int custom_match_prq_cancel(custom_match_prq *list, void *req)
 
 static inline void* to_memory_pool(hashmap *map, bucket_node *node)
 {
-    void* retval = node->value;
+    void* retval = __atomic_load_n(&node->value,__ATOMIC_RELAXED);
     while (!retval) {
         // wait until other thread has finished initializing this value
-        retval=node->value;
-        //TODO some memory fence?
+        retval=__atomic_load_n(&node->value,__ATOMIC_RELAXED);
     }
-    node->value=NULL;
+    // happens before relation in this thread, relaxed order is still sufficient
+    __atomic_store_n(&node->value,NULL,__ATOMIC_RELAXED);
     OB1_MATCHING_LOCK(&map->mutex);
     node->next = map->memory_pool;
     map->memory_pool = node;
@@ -267,7 +267,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 new_elem->peer = peer;
                 new_elem->next = NULL;
                 new_elem->is_recv = is_recv;
-                assert(new_elem->value==NULL);
+                assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
                 *to_fill = &new_elem->value;
                 insert_to_list(&my_bucket->buckets[i], new_elem, is_recv);
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
@@ -306,7 +306,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 new_elem->peer = peer;
                 new_elem->next = NULL;
                 new_elem->is_recv = is_recv;
-                assert(new_elem->value==NULL);
+                assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
                 *to_fill = &new_elem->value;
                 my_bucket->other_keys_bucket_tail->next = new_elem;
                 my_bucket->other_keys_bucket_tail = new_elem;
@@ -346,7 +346,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     new_elem->peer = peer;
     new_elem->next = NULL;
     new_elem->is_recv = is_recv;
-    assert(new_elem->value==NULL);
+    assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
     *to_fill = &new_elem->value;
 
     if (my_bucket->other_keys_bucket_tail == NULL) {

@@ -126,7 +126,7 @@ int main(int argc, char **argv)
             // search posted receives (PRQ)
             void *recv_req = get_match_or_insert(matching_map, tag, src, &to_fill, false);
             if (recv_req == NULL) {
-                *to_fill=payload;
+                __atomic_store_n(to_fill,payload,__ATOMIC_RELAXED);
                 prq_appends++;
                 pq_size++;
                 if (pq_size > pq_max)
@@ -139,9 +139,9 @@ int main(int argc, char **argv)
             // Operation 2: message arrival
             void *msg_found = get_match_or_insert(matching_map, tag, src, &to_fill, true);
             if (msg_found == NULL) {
+                __atomic_store_n(to_fill,payload,__ATOMIC_RELAXED);
                 umq_appends++;
                 uq_size++;
-                *to_fill=payload;
                 if (uq_size > uq_max)
                     uq_max = uq_size;
             } else {
