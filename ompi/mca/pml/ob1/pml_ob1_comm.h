@@ -74,7 +74,7 @@ struct mca_pml_comm_t {
     size_t last_probed;
 #if MCA_PML_OB1_CUSTOM_MATCH
     custom_match_prq *prq;
-    //custom_match_umq *umq;
+    // custom_match_umq *umq;
 #endif
 };
 typedef struct mca_pml_comm_t mca_pml_ob1_comm_t;
@@ -102,18 +102,14 @@ static inline mca_pml_ob1_comm_proc_t *mca_pml_ob1_peer_lookup(struct ompi_commu
         ompi_rte_abort(-1, "PML OB1 received a message from a rank outside the"
                            " valid range of the communicator. Please submit a bug request!");
     }
-    if (OPAL_UNLIKELY(NULL == pml_comm->procs[rank])) {
-        // guard creation by lock
-        OB1_MATCHING_LOCK(&pml_comm->matching_lock);
-        if (OPAL_LIKELY(NULL
-                          == pml_comm->procs[rank])) {
-            // need to check again when actually holding the lock, as other may have initialized peer by now
-            mca_pml_ob1_peer_create(comm, pml_comm, rank);
-        }
-        OB1_MATCHING_UNLOCK(&pml_comm->matching_lock);
 
+    if (OPAL_UNLIKELY(NULL == __atomic_load_n(&pml_comm->procs[rank], __ATOMIC_RELAXED))) {
+        // no need to guard creation by lock, as it is realized with an atomic ptr swap
+        mca_pml_ob1_peer_create(comm, pml_comm, rank);
     }
 
+    assert(NULL != pml_comm->procs[rank]);
+    // no need for atomic operation, as we know no write will take place anymore
     return pml_comm->procs[rank];
 }
 
