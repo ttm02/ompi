@@ -1,7 +1,4 @@
-// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I..
-// -I../3rd-party/openpmix/include matching_performance_map.c -Wno-format
-// ../opal/class/.libs/opal_object.o ../opal/mca/threads/base/.libs/mutex.o
-// ../opal/mca/threads/pthreads/.libs/threads_pthreads_module.o -lpthread
+// compilation: gcc -O2 -g -fopenmp -I../ompi/include/ -I../opal/include/ -I..  -I../3rd-party/openpmix/include matching_performance_map.c -Wno-format ../opal/class/.libs/opal_object.o ../opal/mca/threads/base/.libs/mutex.o ../opal/mca/threads/pthreads/.libs/threads_pthreads_module.o ../opal/.libs/libopen-pal.so -lpthread -o map
 /*
  * PRQ/UMQ Performance Test
  * Simulates message-arrival and receive-posted operations
@@ -123,11 +120,13 @@ int main(int argc, char **argv)
         const int tag = tags[rand_r(&srand_buffer[omp_get_thread_num()]) % num_tags];
         const int src = ranks[rand_r(&srand_buffer[omp_get_thread_num()]) % num_ranks];
         void *payload = (void *) (uintptr_t) i + 1; // payload cannot be NULL
+        void** to_fill =NULL;
         if (rand_r(&srand_buffer[omp_get_thread_num()]) % 2 == 1) {
             // Operation 1: receive posted
             // search posted receives (PRQ)
-            void *recv_req = get_match_or_insert(matching_map, tag, src, payload, false);
+            void *recv_req = get_match_or_insert(matching_map, tag, src, &to_fill, false);
             if (recv_req == NULL) {
+                *to_fill=payload;
                 prq_appends++;
                 pq_size++;
                 if (pq_size > pq_max)
@@ -138,10 +137,11 @@ int main(int argc, char **argv)
             }
         } else {
             // Operation 2: message arrival
-            void *msg_found = get_match_or_insert(matching_map, tag, src, payload, true);
+            void *msg_found = get_match_or_insert(matching_map, tag, src, &to_fill, true);
             if (msg_found == NULL) {
                 umq_appends++;
                 uq_size++;
+                *to_fill=payload;
                 if (uq_size > uq_max)
                     uq_max = uq_size;
             } else {
