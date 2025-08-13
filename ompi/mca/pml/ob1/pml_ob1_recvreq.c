@@ -1320,6 +1320,7 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
     }
 #endif /*OPAL_ENABLE_FT_MPI*/
 
+    void** to_insert=NULL;
 
     /* attempt to match posted recv */
     if(req->req_recv.req_base.req_peer == OMPI_ANY_SOURCE) {// disabled branch per assertion
@@ -1348,10 +1349,11 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
         proc = mca_pml_ob1_peer_lookup (comm, req->req_recv.req_base.req_peer);
         req->req_recv.req_base.req_proc = proc->ompi_proc;
 #if MCA_PML_OB1_CUSTOM_MATCH
+
         //frag = recv_req_match_specific_proc(req, proc, &hold_prev, &hold_elem, &hold_index);// assume no lock
         frag = get_match_or_insert( req->req_recv.req_base.req_comm->c_pml_comm->prq,
                                              req->req_recv.req_base.req_tag,
-                                             req->req_recv.req_base.req_peer,req,false);
+                                             req->req_recv.req_base.req_peer,&to_insert,false);
 
 #else
         frag = recv_req_match_specific_proc(req, proc);
@@ -1373,6 +1375,7 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
         //    custom_match_prq_append(ob1_comm->prq, req,
         //                            req->req_recv.req_base.req_tag,
         //                            req->req_recv.req_base.req_peer);// assume no lock
+        __atomic_store_n(to_insert,req,__ATOMIC_RELAXED);
 #else
             append_recv_req_to_queue(queue, req);
 #endif
@@ -1396,7 +1399,7 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
 #if MCA_PML_OB1_CUSTOM_MATCH
 // already done before
             //custom_match_umq_remove_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq, hold_prev, hold_elem, hold_index);// assume no lock
-#else
+ #else
             opal_list_remove_item(&proc->unexpected_frags,
                                   (opal_list_item_t*)frag);
 #endif
