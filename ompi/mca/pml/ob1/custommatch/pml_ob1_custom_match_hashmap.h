@@ -14,8 +14,8 @@
 #ifndef PML_OB1_CUSTOM_MATCH_HASHMAP_H
 #define PML_OB1_CUSTOM_MATCH_HASHMAP_H
 
-#include "../pml_ob1.h"
 #include "../../../../../opal/include/opal/prefetch.h"
+#include "../pml_ob1.h"
 #include "../pml_ob1_recvfrag.h"
 #include "../pml_ob1_recvreq.h"
 
@@ -93,12 +93,20 @@ static inline int custom_match_prq_cancel(custom_match_prq *list, void *req)
     return 0;
 }*/
 
-static inline void to_memory_pool(hashmap *map, bucket_node *node)
+static inline void* to_memory_pool(hashmap *map, bucket_node *node)
 {
+    void* retval = node->value;
+    while (!retval) {
+        // wait until other thread has finished initializing this value
+        retval=node->value;
+        //TODO some memory fence?
+    }
+    node->value=NULL;
     OB1_MATCHING_LOCK(&map->mutex);
     node->next = map->memory_pool;
     map->memory_pool = node;
     OB1_MATCHING_UNLOCK(&map->mutex);
+    return retval;
 }
 
 static inline bucket_node *get_bucket_node(hashmap *map)
@@ -232,10 +240,11 @@ static inline void *remove_from_list(struct bucket *my_bucket)
 // returns the match (and removed matched from queue)
 // or inserts into the queue if no match and returns void
 // basically combining the different matching queues
-static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *payload, bool is_recv)
+// to_fill will be set to void** where teh actual payload data needs to be dropped, if elem is inserted
+static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void*** to_fill, bool is_recv)
 {
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-    printf("try to match (%d,%d) - list: %p req: %p\n",tag,peer, map, payload);
+    printf("try to match (%d,%d) - list: %p\n",tag,peer, map);
 #endif
     //printf("access bucket %d (%d,%d,%d)\n",matching_hash_func(tag, peer),tag,peer,is_recv);
     bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
@@ -258,11 +267,12 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                 new_elem->peer = peer;
                 new_elem->next = NULL;
                 new_elem->is_recv = is_recv;
-                new_elem->value = payload;
+                assert(new_elem->value==NULL);
+                *to_fill = &new_elem->value;
                 insert_to_list(&my_bucket->buckets[i], new_elem, is_recv);
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("add (%d,%d) to queue%d - list: %p req: %p\n",tag,peer, is_recv, map, payload);
+                printf("add (%d,%d) to queue%d - list: %p\n",tag,peer, is_recv, map);
 #endif
                 return NULL; // inserted into queue without a match
 
@@ -272,13 +282,10 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                 bucket_node *elem_to_dequeue = remove_from_list(&my_bucket->buckets[i]);
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("matched (%d,%d) from queue%d - list: %p req: %p to:%p\n",tag,peer, !is_recv, map, payload,elem_to_dequeue->value);
+                printf("matched (%d,%d) from queue%d - list: %p \n",tag,peer, !is_recv, map);
 #endif
                 // free element
-                void *retval = elem_to_dequeue->value;
-                to_memory_pool(map, elem_to_dequeue);
-
-                return retval;
+                return to_memory_pool(map, elem_to_dequeue);
             }
         }
     }
@@ -299,12 +306,13 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                 new_elem->peer = peer;
                 new_elem->next = NULL;
                 new_elem->is_recv = is_recv;
-                new_elem->value = payload;
+                assert(new_elem->value==NULL);
+                *to_fill = &new_elem->value;
                 my_bucket->other_keys_bucket_tail->next = new_elem;
                 my_bucket->other_keys_bucket_tail = new_elem;
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("add (%d,%d) to queue%d - list: %p req: %p\n",tag,peer, is_recv, map, payload);
+                printf("add (%d,%d) to queue%d - list: %p \n",tag,peer, is_recv, map);
 #endif
                 return NULL;
             } else {
@@ -321,13 +329,12 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
                     // also works when list is emptied
                 }
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
-                void *retval = elem->value;
+
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("matched (%d,%d) from queue%d - list: %p req: %p to:%p\n",tag,peer, !is_recv, map, payload,retval);
+                printf("matched (%d,%d) from queue%d - list: %p \n",tag,peer, !is_recv, map);
 #endif
 
-                to_memory_pool(map, elem);
-                return retval;
+                return to_memory_pool(map, elem);
             }
         }
         prev_elem = elem;
@@ -339,7 +346,8 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
     new_elem->peer = peer;
     new_elem->next = NULL;
     new_elem->is_recv = is_recv;
-    new_elem->value = payload;
+    assert(new_elem->value==NULL);
+    *to_fill = &new_elem->value;
 
     if (my_bucket->other_keys_bucket_tail == NULL) {
         assert(my_bucket->other_keys_bucket_head == NULL);
@@ -351,7 +359,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void *p
     }
     OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-    printf("add (%d,%d) to queue%d - list: %p req: %p\n",tag,peer, is_recv, map, payload);
+    printf("add (%d,%d) to queue%d - list: %p\n",tag,peer, is_recv, map);
 #endif
     return NULL;
 }
