@@ -244,7 +244,7 @@ static inline void *remove_from_list(struct bucket *my_bucket)
 static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void*** to_fill, bool is_recv)
 {
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-    printf("try to match (%d,%d) - list: %p\n",tag,peer, map);
+    printf("%s try match (%d,%d)\n",is_recv?"recv posted":"msg arrived",tag,peer);
 #endif
     //printf("access bucket %d (%d,%d,%d)\n",matching_hash_func(tag, peer),tag,peer,is_recv);
     bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
@@ -255,6 +255,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
             // initialize on first use
             my_bucket->buckets[i].tag = tag;
             my_bucket->buckets[i].peer = peer;
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+            printf("initialize bucket %d_%d: (%d,%d)\n",matching_hash_func(tag, peer),i,tag,peer);
+#endif
         }
         if (OPAL_LIKELY(my_bucket->buckets[i].tag == tag && my_bucket->buckets[i].peer == peer)) {
             // found correct bucket
@@ -272,7 +275,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 insert_to_list(&my_bucket->buckets[i], new_elem, is_recv);
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("add (%d,%d) to queue%d - list: %p\n",tag,peer, is_recv, map);
+                printf("add (%d,%d) to %s \n",tag,peer, is_recv?"prq":"umq");
 #endif
                 return NULL; // inserted into queue without a match
 
@@ -282,7 +285,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 bucket_node *elem_to_dequeue = remove_from_list(&my_bucket->buckets[i]);
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("matched (%d,%d) from queue%d - list: %p \n",tag,peer, !is_recv, map);
+                printf("matched (%d,%d) from %s \n",tag,peer, !is_recv?"prq":"umq");
 #endif
                 // free element
                 return to_memory_pool(map, elem_to_dequeue);
@@ -292,6 +295,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     // multiple hash collisions
 #ifdef COUNT_COLLISIONS
     __atomic_add_fetch(&map->num_collisions,1,__ATOMIC_ACQ_REL);
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+    printf("collision in bucket %d (%d,%d)\n",matching_hash_func(tag, peer),tag,peer);
+#endif
 #endif
     bucket_node *prev_elem = NULL;
     bucket_node *elem = my_bucket->other_keys_bucket_head;
@@ -312,7 +318,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 my_bucket->other_keys_bucket_tail = new_elem;
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("add (%d,%d) to queue%d - list: %p \n",tag,peer, is_recv, map);
+                printf("add (%d,%d) to %s \n",tag,peer, is_recv?"prq":"umq");
 #endif
                 return NULL;
             } else {
@@ -331,7 +337,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("matched (%d,%d) from queue%d - list: %p \n",tag,peer, !is_recv, map);
+                printf("matched (%d,%d) from %s \n",tag,peer, !is_recv?"prq":"umq");
 #endif
 
                 return to_memory_pool(map, elem);
@@ -359,7 +365,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     }
     OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
-    printf("add (%d,%d) to queue%d - list: %p\n",tag,peer, is_recv, map);
+    printf("add (%d,%d) to %s \n",tag,peer, is_recv?"prq":"umq");
 #endif
     return NULL;
 }
