@@ -320,9 +320,11 @@ int mca_pml_ob1_add_comm(ompi_communicator_t* comm)
 #if !MCA_PML_OB1_CUSTOM_MATCH
             opal_list_append( &pml_proc->unexpected_frags, (opal_list_item_t*)frag );
 #else
-            void* match = get_match_or_insert(pml_comm->prq, hdr->hdr_tag, hdr->hdr_src, frag,true);
+            void ** to_insert;
+            void* match = get_match_or_insert(pml_comm->prq, hdr->hdr_tag, hdr->hdr_src, &to_insert,true);
             // not possible to find a match at this point
             assert(match == NULL);
+            __atomic_store_n(to_insert,frag,__ATOMIC_RELAXED)
             //custom_match_umq_append(pml_comm->umq, hdr->hdr_tag, hdr->hdr_src, frag);
 #endif
             PERUSE_TRACE_MSG_EVENT(PERUSE_COMM_MSG_INSERT_IN_UNEX_Q, comm,
@@ -339,9 +341,11 @@ int mca_pml_ob1_add_comm(ompi_communicator_t* comm)
             opal_list_append( &pml_proc->unexpected_frags, (opal_list_item_t*)frag );
 #else
             //custom_match_umq_append(pml_comm->umq, hdr->hdr_tag, hdr->hdr_src, frag);
-            void* match = get_match_or_insert(pml_comm->prq, hdr->hdr_tag, hdr->hdr_src, frag,true);
+            void** to_insert;
+            void* match = get_match_or_insert(pml_comm->prq, hdr->hdr_tag, hdr->hdr_src, &to_insert,true);
             // not possible to find a match at this point
             assert(match == NULL);
+            __atomic_store_n(to_insert,frag,__ATOMIC_RELAXED)
 #endif
             PERUSE_TRACE_MSG_EVENT(PERUSE_COMM_MSG_INSERT_IN_UNEX_Q, comm,
                                    hdr->hdr_src, hdr->hdr_tag, PERUSE_RECV);

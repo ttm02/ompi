@@ -983,18 +983,10 @@ static mca_pml_ob1_recv_request_t *match_one (mca_btl_base_module_t *btl,
     do { //TODO why do i need this loop? I will go out of the loop on first try anyway either due to match or return NULL on no match
 #if MCA_PML_OB1_CUSTOM_MATCH
         //match = match_incomming(hdr, comm, proc); // assume no lock (as the queue locks itself if needed)
-        bool return_frag_on_match=false;
-        //TODO: only allocatge frag, when it is needed, no need to perfrom this on match
-        if(NULL == frag) {
-            MCA_PML_OB1_RECV_FRAG_ALLOC(frag);
-            MCA_PML_OB1_RECV_FRAG_INIT(frag, hdr, segments, num_segments, btl);
-            return_frag_on_match = true;
-        }
-        match = get_match_or_insert(comm->prq, hdr->hdr_tag, hdr->hdr_src,frag,true);
 
-        if (match && return_frag_on_match) {
-            MCA_PML_OB1_RECV_FRAG_RETURN(frag);
-        }
+        void** to_insert=NULL;
+        match = get_match_or_insert(comm->prq, hdr->hdr_tag, hdr->hdr_src,&to_insert,true);
+
 #else
         if (!OMPI_COMM_CHECK_ASSERT_NO_ANY_SOURCE (comm_ptr)) {
             match = match_incomming(hdr, comm, proc);
@@ -1045,6 +1037,11 @@ static mca_pml_ob1_recv_request_t *match_one (mca_btl_base_module_t *btl,
 #if MCA_PML_OB1_CUSTOM_MATCH
         // was done in one go by above operation
        // append_frag_to_umq(comm->umq, btl, hdr, segments, num_segments, frag); // assume no lock
+        if(NULL == frag) {
+            MCA_PML_OB1_RECV_FRAG_ALLOC(frag);
+            MCA_PML_OB1_RECV_FRAG_INIT(frag, hdr, segments, num_segments, btl);
+        }
+        __atomic_store_n(to_insert,frag,__ATOMIC_RELAXED);
 #else
         append_frag_to_list(&proc->unexpected_frags, btl, hdr, segments,
                             num_segments, frag);
