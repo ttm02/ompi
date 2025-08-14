@@ -321,7 +321,7 @@ int mca_pml_ob1_add_comm(ompi_communicator_t* comm)
             opal_list_append( &pml_proc->unexpected_frags, (opal_list_item_t*)frag );
 #else
             void ** to_insert;
-            void* match = get_match_or_insert(pml_comm->prq, hdr->hdr_tag, hdr->hdr_src, &to_insert,true);
+            void* match = get_match_or_insert(pml_comm->prq, hdr->hdr_tag, hdr->hdr_src, &to_insert,false);
             // not possible to find a match at this point
             assert(match == NULL);
             __atomic_store_n(to_insert,frag,__ATOMIC_RELAXED)
@@ -342,7 +342,7 @@ int mca_pml_ob1_add_comm(ompi_communicator_t* comm)
 #else
             //custom_match_umq_append(pml_comm->umq, hdr->hdr_tag, hdr->hdr_src, frag);
             void** to_insert;
-            void* match = get_match_or_insert(pml_comm->prq, hdr->hdr_tag, hdr->hdr_src, &to_insert,true);
+            void* match = get_match_or_insert(pml_comm->prq, hdr->hdr_tag, hdr->hdr_src, &to_insert,false);
             // not possible to find a match at this point
             assert(match == NULL);
             __atomic_store_n(to_insert,frag,__ATOMIC_RELAXED)
@@ -355,6 +355,7 @@ int mca_pml_ob1_add_comm(ompi_communicator_t* comm)
              * situation as the cant_match is only checked when a new fragment is received from
              * the network.
              */
+            //TODO is non-atomic load enough?
             if( NULL != pml_proc->frags_cant_match ) {
                 // the locking part is not needed here, as we still own the comm at this moment
                 // nevertheless the unmatched queue implementation expects the lock
