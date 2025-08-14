@@ -1353,7 +1353,7 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
         //frag = recv_req_match_specific_proc(req, proc, &hold_prev, &hold_elem, &hold_index);// assume no lock
         frag = get_match_or_insert( req->req_recv.req_base.req_comm->c_pml_comm->prq,
                                              req->req_recv.req_base.req_tag,
-                                             req->req_recv.req_base.req_peer,&to_insert,false);
+                                             req->req_recv.req_base.req_peer,&to_insert,true);
 
 #else
         frag = recv_req_match_specific_proc(req, proc);

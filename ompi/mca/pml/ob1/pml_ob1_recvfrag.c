@@ -1012,7 +1012,7 @@ static mca_pml_ob1_recv_request_t *match_one (mca_btl_base_module_t *btl,
 #if MCA_PML_OB1_CUSTOM_MATCH
         //match = match_incomming(hdr, comm, proc); // assume no lock (as the queue locks itself if needed)
         void** to_insert=NULL;
-        match = get_match_or_insert(comm->prq, hdr->hdr_tag, hdr->hdr_src,&to_insert,true);
+        match = get_match_or_insert(comm->prq, hdr->hdr_tag, hdr->hdr_src,&to_insert,false);
 
 #else
         if (!OMPI_COMM_CHECK_ASSERT_NO_ANY_SOURCE (comm_ptr)) {
