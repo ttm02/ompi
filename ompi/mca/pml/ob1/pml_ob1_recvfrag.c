@@ -691,7 +691,7 @@ int mca_pml_ob1_merge_cant_match( ompi_communicator_t * ompi_comm )
         }*/
         //lock to ensure no Thread is currently updating the list
 
-        OB1_MATCHING_LOCK(&pml_comm->matching_lock);
+        OB1_MATCHING_LOCK(&pml_comm->matching_lock);// lock to make shure no other T is currently modifiing the list
         frags_cant_match = __atomic_exchange_n(&proc->frags_cant_match,NULL,__ATOMIC_ACQ_REL);
         // we can unlock here, other T will build a new list while we process the old one
         OB1_MATCHING_UNLOCK(&pml_comm->matching_lock);

@@ -1368,18 +1368,24 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
                                 &(req->req_recv.req_base), PERUSE_RECV);
         /* We didn't find any matches.  Record this irecv so we can match
            it when the message comes in. */
+        req->req_match_received = false;// no lock
         if(OPAL_LIKELY(req->req_recv.req_base.req_type != MCA_PML_REQUEST_IPROBE &&
-                       req->req_recv.req_base.req_type != MCA_PML_REQUEST_IMPROBE))
+                       req->req_recv.req_base.req_type != MCA_PML_REQUEST_IMPROBE)) {
 #if MCA_PML_OB1_CUSTOM_MATCH
             // already done above
-        //    custom_match_prq_append(ob1_comm->prq, req,
-        //                            req->req_recv.req_base.req_tag,
-        //                            req->req_recv.req_base.req_peer);// assume no lock
-        __atomic_store_n(to_insert,req,__ATOMIC_RELAXED);
+            //    custom_match_prq_append(ob1_comm->prq, req,
+            //                            req->req_recv.req_base.req_tag,
+            //                            req->req_recv.req_base.req_peer);// assume no lock
+
 #else
             append_recv_req_to_queue(queue, req);
 #endif
-        req->req_match_received = false;// no lock
+
+            __atomic_store_n(to_insert,req,__ATOMIC_RELAXED);
+        }else {
+            printf("Matching Algo has no support for Iprobe or IMprobe implemented yet\n");
+            exit(-1);
+        }
         //OB1_MATCHING_UNLOCK(&ob1_comm->matching_lock);
     } else {
         if(OPAL_LIKELY(!IS_PROB_REQ(req))) {
