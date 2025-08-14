@@ -457,12 +457,16 @@ int mca_pml_ob1_revoke_comm( struct ompi_communicator_t* ompi_comm, bool coll_on
 
 mca_pml_ob1_recv_frag_t *ompi_pml_ob1_check_cantmatch_for_match (mca_pml_ob1_comm_proc_t *proc,opal_mutex_t* matching_lock)
 {
-    //TODO is __ATOMIC_RELAXED sufficient here, as teh lock will assert a happend before relation if necessary?
     mca_pml_ob1_recv_frag_t *frag = __atomic_load_n(&proc->frags_cant_match,__ATOMIC_ACQUIRE);
 
     if( (NULL != frag) && (frag->hdr.hdr_match.hdr_seq == __atomic_load_n(&proc->expected_sequence,__ATOMIC_ACQUIRE) )) {
+        mca_pml_ob1_recv_frag_t * result = NULL;
         OB1_MATCHING_LOCK(matching_lock);// list is guarded by lock
-        mca_pml_ob1_recv_frag_t * result =remove_head_from_ordered_list(&proc->frags_cant_match);
+        // need to check the list header's sequence number again (if another T acquired the lock and changed list before us)
+        frag = __atomic_load_n(&proc->frags_cant_match,__ATOMIC_ACQUIRE);
+        if( (NULL != frag) && (frag->hdr.hdr_match.hdr_seq == __atomic_load_n(&proc->expected_sequence,__ATOMIC_ACQUIRE) )) {
+            result =remove_head_from_ordered_list(&proc->frags_cant_match);
+        }
         OB1_MATCHING_UNLOCK(matching_lock);
         return result;
     }
