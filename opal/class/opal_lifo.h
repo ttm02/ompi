@@ -72,18 +72,22 @@ static inline bool opal_update_counted_pointer(volatile opal_counted_pointer_t *
     opal_counted_pointer_t new_p;
     new_p.data.item = (intptr_t) item;
     new_p.data.counter = old->data.counter + 1;
-    return opal_atomic_compare_exchange_strong_128(&addr->atomic_value, &old->value, new_p.value);
+    return opal_atomic_compare_exchange_strong_rel_128(&addr->atomic_value, &old->value,
+                                                       new_p.value);
 }
 
 __opal_attribute_always_inline__ static inline void
 opal_read_counted_pointer(volatile opal_counted_pointer_t *volatile addr,
                           opal_counted_pointer_t *value)
 {
+    // TODO implement on architectures that not have 128 bit atomic
+    __atomic_load(addr, value, __ATOMIC_ACQUIRE);
+    // technically UB
     /* most platforms do not read the value atomically so make sure we read the counted pointer in a
      * specific order */
-    value->data.counter = addr->data.counter;
-    opal_atomic_rmb();
-    value->data.item = addr->data.item;
+    // value->data.counter = addr->data.counter;
+    // opal_atomic_rmb();
+    // value->data.item = addr->data.item;
 }
 
 #endif
@@ -122,7 +126,8 @@ OPAL_DECLSPEC OBJ_CLASS_DECLARATION(opal_lifo_t);
  */
 static inline bool opal_lifo_is_empty(opal_lifo_t *lifo)
 {
-    return (opal_list_item_t *) lifo->opal_lifo_head.data.item == &lifo->opal_lifo_ghost;
+    return (opal_list_item_t *) __atomic_load_n(&lifo->opal_lifo_head.data.item, __ATOMIC_RELAXED)
+           == &lifo->opal_lifo_ghost;
 }
 
 #if OPAL_HAVE_ATOMIC_COMPARE_EXCHANGE_128 && !OPAL_HAVE_ATOMIC_LLSC_PTR
@@ -133,16 +138,22 @@ static inline bool opal_lifo_is_empty(opal_lifo_t *lifo)
  */
 static inline opal_list_item_t *opal_lifo_push_atomic(opal_lifo_t *lifo, opal_list_item_t *item)
 {
-    opal_list_item_t *next = (opal_list_item_t *) lifo->opal_lifo_head.data.item;
-
+    opal_counted_pointer_t old_head, new_head;
     do {
-        item->opal_list_next = next;
-        opal_atomic_wmb();
+        opal_read_counted_pointer(&lifo->opal_lifo_head, &old_head);
 
+        // set next of item
+        __atomic_store_n(&item->opal_list_next, (opal_list_item_t *) old_head.data.item,
+                         __ATOMIC_RELEASE);
+        // opal_atomic_wmb();
+
+        new_head.data.item = (opal_atomic_intptr_t) item;
         /* to protect against ABA issues it is sufficient to only update the counter in pop */
-        if (opal_atomic_compare_exchange_strong_ptr(&lifo->opal_lifo_head.data.item,
-                                                    (intptr_t *) &next, (intptr_t) item)) {
-            return next;
+        new_head.data.counter = old_head.data.counter;
+
+        if (opal_atomic_compare_exchange_strong_rel_128(&lifo->opal_lifo_head.atomic_value,
+                                                        &old_head.value, new_head.value)) {
+            return (opal_list_item_t *) old_head.data.item;
         }
         /* DO some kind of pause to release the bus */
     } while (1);
@@ -156,18 +167,18 @@ static inline opal_list_item_t *opal_lifo_pop_atomic(opal_lifo_t *lifo)
     opal_counted_pointer_t old_head;
     opal_list_item_t *item;
 
-    opal_read_counted_pointer(&lifo->opal_lifo_head, &old_head);
-
     do {
-        item = (opal_list_item_t *) old_head.data.item;
+        opal_read_counted_pointer(&lifo->opal_lifo_head, &old_head);
+        item = (opal_list_item_t *) old_head.data.item; // I own old_head, no need for atomic access
         if (item == &lifo->opal_lifo_ghost) {
             return NULL;
         }
 
         if (opal_update_counted_pointer(&lifo->opal_lifo_head, &old_head,
-                                        (opal_list_item_t *) item->opal_list_next)) {
-            opal_atomic_wmb();
-            item->opal_list_next = NULL;
+                                        (opal_list_item_t *) __atomic_load_n(&item->opal_list_next,
+                                                                             __ATOMIC_ACQUIRE))) {
+            // opal_atomic_wmb();
+            __atomic_store_n(&item->opal_list_next, NULL, __ATOMIC_RELEASE);
             return item;
         }
     } while (1);

@@ -126,13 +126,22 @@ static inline bool opal_atomic_compare_exchange_strong_rel_64(opal_atomic_int64_
 
 #    define OPAL_HAVE_ATOMIC_COMPARE_EXCHANGE_128 1
 
-static inline bool opal_atomic_compare_exchange_strong_128(opal_atomic_int128_t *addr,
+static inline bool opal_atomic_compare_exchange_strong_acq_128(opal_atomic_int128_t *addr,
                                                            opal_int128_t *oldval,
                                                            opal_int128_t newval)
 {
     return __atomic_compare_exchange_n(addr, oldval, newval, false, __ATOMIC_ACQUIRE,
                                        __ATOMIC_RELAXED);
 }
+
+static inline bool opal_atomic_compare_exchange_strong_rel_128(opal_atomic_int128_t *addr,
+                                                           opal_int128_t *oldval,
+                                                           opal_int128_t newval)
+{
+    return __atomic_compare_exchange_n(addr, oldval, newval, false, __ATOMIC_RELEASE,
+                                       __ATOMIC_RELAXED);
+}
+
 
 #elif defined(OPAL_HAVE_SYNC_BUILTIN_CSWAP_INT128) && OPAL_HAVE_SYNC_BUILTIN_CSWAP_INT128
 
