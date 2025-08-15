@@ -46,12 +46,6 @@ int main(int argc, char **argv) {
     }
 
     omp_set_num_threads(nthreads);
-
-    // Allocate buffers
-    char *sendbuf = malloc(msg_size * nthreads*2);
-    char *recvbuf = malloc(msg_size * nthreads*2);
-
-
 // communication partners
         int next = (rank + 1) % world_size;
         int prev = (rank - 1 + world_size) % world_size;// + world size to avoid negative
@@ -65,10 +59,11 @@ int main(int argc, char **argv) {
     #pragma omp parallel
     {
         int tid = omp_get_thread_num();
-        char *sbuf = sendbuf + tid * msg_size;
-        char *sbuf2 = sendbuf + tid * msg_size +msg_size * nthreads;
-        char *rbuf = recvbuf + tid * msg_size;
-        char *rbuf2 = recvbuf + tid * msg_size +msg_size * nthreads;
+        // Allocate buffers
+        char *sbuf = malloc(msg_size);
+        char *rbuf = malloc(msg_size);
+        char *sbuf2 = malloc(msg_size);
+        char *rbuf2 = malloc(msg_size);
         MPI_Request reqs[4];
         MPI_Status stats[4];
 //        int tag  = tid; // thread pair wise communication
@@ -86,6 +81,10 @@ int main(int argc, char **argv) {
 
             MPI_Waitall(4, reqs, stats);
         }
+        free(sbuf);
+        free(rbuf);
+        free(sbuf2);
+        free(rbuf2);
     }
 
     // Synchronize after completion
@@ -98,9 +97,6 @@ int main(int argc, char **argv) {
         printf("Threads=%d, iters=%ld per thread, msg_size=%d bytes: Time=%.6f s, Throughput=%.3f Mops/s\n",
                nthreads, iterations, msg_size, elapsed, total_ops / elapsed / 1e6);
     }
-
-    free(sendbuf);
-    free(recvbuf);
     MPI_Finalize();
     return 0;
 }
