@@ -72,13 +72,21 @@ int ompi_sync_wait_mt(ompi_wait_sync_t *sync)
     /* Now that we hold the lock make sure another thread has not already
      * call cond_signal.
      */
-    if (sync->count <= 0) {
+
+        if (sync->count <= 0) {
+            opal_thread_internal_mutex_unlock(&sync->lock);
+            return (0 == sync->status) ? OPAL_SUCCESS : OPAL_ERROR;
+        }
+
+    // hotfix for lock-order inversion, set other lock free
+    while (OPAL_THREAD_TRYLOCK(&wait_sync_lock)) {
         opal_thread_internal_mutex_unlock(&sync->lock);
-        return (0 == sync->status) ? OPAL_SUCCESS : OPAL_ERROR;
+        // possibly yield to other T
+        opal_thread_internal_mutex_lock(&sync->lock);
     }
 
     /* Insert sync on the list of pending synchronization constructs */
-    OPAL_THREAD_LOCK(&wait_sync_lock);
+    //OPAL_THREAD_LOCK(&wait_sync_lock);
     if (NULL == opal_threads_base_wait_sync_list) {
         sync->next = sync->prev = sync;
         opal_threads_base_wait_sync_list = sync;
