@@ -175,13 +175,13 @@ int main(int argc, char *argv[])
 
 #if OPAL_HAVE_ATOMIC_COMPARE_EXCHANGE_128
     vol128 = 42, old128 = 42, new128 = 50;
-    assert(opal_atomic_compare_exchange_strong_128(&vol128, &old128, new128) == true);
+    assert(opal_atomic_compare_exchange_strong_rel_128(&vol128, &old128, new128) == true);
     opal_atomic_rmb();
     assert(new128 == vol128);
     assert(old128 == 42);
 
     vol128 = 42, old128 = 420, new128 = 50;
-    assert(opal_atomic_compare_exchange_strong_128(&vol128, &old128, new128) == false);
+    assert(opal_atomic_compare_exchange_strong_rel_128(&vol128, &old128, new128) == false);
     opal_atomic_rmb();
     assert(vol128 == 42);
     assert(old128 == 42);
