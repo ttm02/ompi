@@ -28,8 +28,8 @@
 
 static inline void opal_atomic_lock_init(opal_atomic_lock_t *lock, int32_t value)
 {
-    *lock = value;
-    opal_atomic_wmb();
+
+    __atomic_store_n(lock,value,__ATOMIC_RELEASE);
 }
 
 static inline int opal_atomic_trylock(opal_atomic_lock_t *lock)
@@ -43,16 +43,14 @@ static inline int opal_atomic_trylock(opal_atomic_lock_t *lock)
 static inline void opal_atomic_lock(opal_atomic_lock_t *lock)
 {
     while (opal_atomic_trylock(lock)) {
-        while (*lock == OPAL_ATOMIC_LOCK_LOCKED) {
-            /* spin */;
-        }
+        /* spin */;
     }
 }
 
 static inline void opal_atomic_unlock(opal_atomic_lock_t *lock)
 {
-    opal_atomic_wmb();
-    *lock = OPAL_ATOMIC_LOCK_UNLOCKED;
+    //assert(OPAL_ATOMIC_LOCK_LOCKED == __atomic_load_n(lock,__ATOMIC_RELAXED));
+    __atomic_store_n(lock,OPAL_ATOMIC_LOCK_UNLOCKED,__ATOMIC_RELEASE);
 }
 
 #endif /* #ifndef ATOMIC_SPINLOCK_IMPL_H */
