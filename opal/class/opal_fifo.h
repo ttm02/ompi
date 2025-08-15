@@ -86,31 +86,40 @@ static inline bool opal_fifo_is_empty(opal_fifo_t *fifo)
  */
 static inline opal_list_item_t *opal_fifo_push_atomic(opal_fifo_t *fifo, opal_list_item_t *item)
 {
-    opal_counted_pointer_t tail = {.value = fifo->opal_fifo_tail.value};
+    opal_counted_pointer_t tail, new_tail;
     const opal_list_item_t *const ghost = &fifo->opal_fifo_ghost;
+    opal_list_item_t *prev;
 
-    item->opal_list_next = (opal_list_item_t *) ghost;
+    /* Initialize the new item */
+    __atomic_store_n(&item->opal_list_next, ghost, __ATOMIC_RELAXED);
 
-    opal_atomic_wmb();
-
+    /* Atomically update the tail pointer */
     do {
-        if (opal_update_counted_pointer(&fifo->opal_fifo_tail, &tail, item)) {
-            break;
-        }
-    } while (1);
+        opal_read_counted_pointer(&fifo->opal_fifo_tail, &tail);
+        new_tail.data.counter = tail.data.counter + 1;
+        new_tail.data.item = (intptr_t) item;
+    } while (!opal_atomic_compare_exchange_strong_rel_128(&fifo->opal_fifo_tail.atomic_value,
+                                                          &tail.value, new_tail.value));
 
-    opal_atomic_wmb();
+    prev = (opal_list_item_t *) tail.data.item;
 
-    if ((intptr_t) ghost == tail.data.item) {
-        /* update the head */
-        opal_counted_pointer_t head = {.value = fifo->opal_fifo_head.value};
-        opal_update_counted_pointer(&fifo->opal_fifo_head, &head, item);
+    /* Link the previous tail to the new item */
+    if (prev == ghost) {
+        /* FIFO was empty - need to update head as well */
+        opal_counted_pointer_t head, new_head;
+        opal_read_counted_pointer(&fifo->opal_fifo_head, &head);
+        new_head.data.counter = head.data.counter + 1;
+        new_head.data.item = (intptr_t) item;
+        // we are the only one, that can modify head at that point:
+        // other removes will see empty list
+        // other insert will insert after us and only update tail
+        __atomic_store_n(&fifo->opal_fifo_head.atomic_value, new_head.value, __ATOMIC_RELEASE);
     } else {
-        /* update previous item */
-        ((opal_list_item_t *) tail.data.item)->opal_list_next = item;
+        /* Link previous item to new item */
+        __atomic_store_n(&prev->opal_list_next, item, __ATOMIC_RELEASE);
     }
 
-    return (opal_list_item_t *) tail.data.item;
+    return prev;
 }
 
 /* Retrieve one element from the FIFO. If we reach the ghost element then the FIFO
@@ -118,59 +127,78 @@ static inline opal_list_item_t *opal_fifo_push_atomic(opal_fifo_t *fifo, opal_li
  */
 static inline opal_list_item_t *opal_fifo_pop_atomic(opal_fifo_t *fifo)
 {
-    opal_list_item_t *item, *next, *ghost = &fifo->opal_fifo_ghost;
-    opal_counted_pointer_t head, tail;
+    opal_counted_pointer_t head, new_head;
+    opal_list_item_t *item, *next;
+    opal_list_item_t *ghost = &fifo->opal_fifo_ghost;
+    // int attempt = 0;
 
-    opal_read_counted_pointer(&fifo->opal_fifo_head, &head);
+    while (1) {
+        /* Prevent excessive spinning */
+        /*if (++attempt == 10) {
+            opal_lifo_release_cpu();
+            attempt = 0;
+        }*/
 
-    do {
-        tail.value = fifo->opal_fifo_tail.value;
-        opal_atomic_rmb();
-
+        /* Read current head */
+        opal_read_counted_pointer(&fifo->opal_fifo_head, &head);
         item = (opal_list_item_t *) head.data.item;
-        next = (opal_list_item_t *) item->opal_list_next;
 
-        if ((intptr_t) ghost == tail.data.item && ghost == item) {
+        if (item == ghost) { // is empty
             return NULL;
         }
 
-        /* the head or next pointer are in an inconsistent state. keep looping. */
-        if (tail.data.item != (intptr_t) item && (intptr_t) ghost != tail.data.item
-            && ghost == next) {
-            opal_read_counted_pointer(&fifo->opal_fifo_head, &head);
-            continue;
-        }
+        next = (opal_list_item_t *) __atomic_load_n(&item->opal_list_next, __ATOMIC_ACQUIRE);
 
-        /* try popping the head */
-        if (opal_update_counted_pointer(&fifo->opal_fifo_head, &head, next)) {
-            break;
-        }
-    } while (1);
+        new_head.data.counter = head.data.counter + 1;
+        new_head.data.item = (intptr_t) next;
 
-    opal_atomic_wmb();
-
-    /* check for tail and head consistency */
-    if (ghost == next) {
-        /* the head was just set to &fifo->opal_fifo_ghost. try to update the tail as well */
-        if (!opal_update_counted_pointer(&fifo->opal_fifo_tail, &tail, ghost)) {
-            /* tail was changed by a push operation. wait for the item's next pointer to be se then
-             * update the head */
-
-            /* wait for next pointer to be updated by push */
-            do {
-                opal_atomic_rmb();
-            } while (ghost == item->opal_list_next);
-
-            /* update the head with the real next value. note that no other thread
-             * will be attempting to update the head until after it has been updated
-             * with the next pointer. push will not see an empty list and other pop
-             * operations will loop until the head is consistent. */
-            fifo->opal_fifo_head.data.item = (intptr_t) item->opal_list_next;
-            opal_atomic_wmb();
+        if (opal_atomic_compare_exchange_strong_rel_128(&fifo->opal_fifo_head.atomic_value,
+                                                        &head.value, new_head.value)) {
+            break; /* Successfully updated head */
         }
     }
 
-    item->opal_list_next = NULL;
+    /* Handle the case where we might have emptied the FIFO */
+    if (next == ghost) {
+        opal_counted_pointer_t tail;
+        /* We potentially emptied the FIFO - try to update tail */
+        opal_read_counted_pointer(&fifo->opal_fifo_tail, &tail);
+
+        if ((opal_list_item_t *) tail.data.item == item) {
+            /* Tail is still pointing to the item we just removed */
+            opal_counted_pointer_t new_tail;
+            new_tail.data.counter = tail.data.counter + 1;
+            new_tail.data.item = (intptr_t) ghost;
+
+            /* Try update tail to ghost - if this fails, another push happened */
+            if (opal_atomic_compare_exchange_strong_rel_128(&fifo->opal_fifo_tail.atomic_value,
+                                                             &tail.value, new_tail.value)) {
+                //update successful, done
+            }else {
+                // tail was updated
+                goto tail_updated;
+            }
+            // else
+        } else {
+            opal_list_item_t *new_next;
+        // else the tail was updated
+        tail_updated:
+            // on tail update, other T has pushed a new item
+            // since tail still linked to us, we expect the other T to update next
+            new_next = ghost;
+            while (new_next == ghost) {
+                new_next = (opal_list_item_t*)__atomic_load_n(&item->opal_list_next, __ATOMIC_ACQUIRE);
+            }
+            // at this point: we are the only one that can update head
+            // other pop will see empty list
+            // other push will add behind us
+            new_head.data.counter++;
+            new_head.data.item = (intptr_t) new_next;
+            __atomic_store_n(&fifo->opal_fifo_head.atomic_value, new_head.value, __ATOMIC_RELEASE);
+        }
+    }
+    /* Clean up the popped item */
+    __atomic_store_n(&item->opal_list_next, NULL, __ATOMIC_RELAXED);
 
     return item;
 }
