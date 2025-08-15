@@ -1381,7 +1381,7 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
             append_recv_req_to_queue(queue, req);
 #endif
 
-            __atomic_store_n(to_insert,req,__ATOMIC_RELAXED);
+            __atomic_store_n(to_insert,req,__ATOMIC_RELEASE);
         }else {
             printf("Matching Algo has no support for Iprobe or IMprobe implemented yet\n");
             exit(-1);

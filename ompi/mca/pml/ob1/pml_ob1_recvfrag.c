@@ -1068,7 +1068,7 @@ static mca_pml_ob1_recv_request_t *match_one (mca_btl_base_module_t *btl,
             MCA_PML_OB1_RECV_FRAG_ALLOC(frag);
             MCA_PML_OB1_RECV_FRAG_INIT(frag, hdr, segments, num_segments, btl);
         }
-        __atomic_store_n(to_insert,frag,__ATOMIC_RELAXED);
+        __atomic_store_n(to_insert,frag,__ATOMIC_RELEASE);
 #else
         append_frag_to_list(&proc->unexpected_frags, btl, hdr, segments,
                             num_segments, frag);
