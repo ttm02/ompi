@@ -72,9 +72,10 @@ int main(int argc, char **argv) {
         MPI_Request reqs[4];
         MPI_Status stats[4];
 //        int tag  = tid; // thread pair wise communication
-            int tag  = 0; // use same tags regardless of threads
+        //int tag  = 0; // use same tags regardless of threads
 
         for (long i = 0; i < iterations; ++i) {
+            int tag  = i+(tid*iterations); // unique tag for each msg
 // halo exchange like benchmark
 // next process
             MPI_Irecv(rbuf, msg_size, MPI_BYTE, next, tag, MPI_COMM_WORLD, &reqs[0]);
