@@ -96,12 +96,11 @@ static inline int custom_match_prq_cancel(custom_match_prq *list, void *req)
 static inline void* to_memory_pool(hashmap *map, bucket_node *node)
 {
     void* retval = __atomic_load_n(&node->value,__ATOMIC_RELAXED);
-    while (!retval) {
+    while (NULL == retval) {
         // wait until other thread has finished initializing this value
-        retval=__atomic_load_n(&node->value,__ATOMIC_RELAXED);
+        retval=__atomic_load_n(&node->value,__ATOMIC_ACQUIRE);
     }
-    // happens before relation in this thread, relaxed order is still sufficient
-    __atomic_store_n(&node->value,NULL,__ATOMIC_RELAXED);
+    __atomic_store_n(&node->value,NULL,__ATOMIC_RELEASE);
     OB1_MATCHING_LOCK(&map->mutex);
     node->next = map->memory_pool;
     map->memory_pool = node;
