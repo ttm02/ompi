@@ -31,7 +31,11 @@
 #include "opal/prefetch.h"
 #include "opal/runtime/opal.h"
 
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
 #include <sanitizer/tsan_interface.h>
+#endif
+#endif
 
 BEGIN_C_DECLS
 
@@ -193,9 +197,12 @@ static inline opal_free_list_item_t *opal_free_list_get_mt(opal_free_list_t *fli
 {
     opal_free_list_item_t *item = (opal_free_list_item_t *) opal_lifo_pop_atomic(&flist->super);
 
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
     __tsan_release(item);// make some tsan false positives go away, as it does not get the recycling of items
     __tsan_acquire(item);
-
+#endif
+#endif
     if (OPAL_UNLIKELY(NULL == item)) {
         opal_mutex_lock(&flist->fl_lock);
         opal_free_list_grow_st(flist, flist->fl_num_per_alloc, &item);
@@ -315,8 +322,12 @@ static inline opal_free_list_item_t *opal_free_list_wait(opal_free_list_t *fl)
  */
 static inline void opal_free_list_return_mt(opal_free_list_t *flist, opal_free_list_item_t *item)
 {
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
     __tsan_acquire(item);// make some tsan false positives go away, as it does not get the recycling of items
     __tsan_release(item);
+#endif
+#endif
     opal_list_item_t *original;
 
     original = opal_lifo_push_atomic(&flist->super, &item->super);
