@@ -177,7 +177,7 @@ static inline bool sm_fifo_write_ep(mca_btl_sm_hdr_t *hdr, struct mca_btl_base_e
  */
 static inline void sm_fifo_write_back(mca_btl_sm_hdr_t *hdr, struct mca_btl_base_endpoint_t *ep)
 {
-    hdr->next = SM_FIFO_FREE;
+    __atomic_store_n(&hdr->next,SM_FIFO_FREE,__ATOMIC_RELAXED);
     sm_fifo_write(ep->fifo, virtual2relativepeer(ep, (char *) hdr));
 }
 
