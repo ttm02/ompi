@@ -101,6 +101,8 @@ int mca_btl_tcp_add_procs(struct mca_btl_base_module_t *btl, size_t nprocs,
             continue;
         }
 
+        // need to aquire the tcp mutex before the proc lock, to avoid Lock-Order inversion
+        OPAL_THREAD_LOCK(&tcp_btl->tcp_endpoints_mutex);
         OPAL_THREAD_LOCK(&tcp_proc->proc_lock);
 
         for (uint32_t j = 0; j < (uint32_t) tcp_proc->proc_endpoint_count; ++j) {
@@ -130,7 +132,7 @@ int mca_btl_tcp_add_procs(struct mca_btl_base_module_t *btl, size_t nprocs,
                 continue;
             }
 
-            OPAL_THREAD_LOCK(&tcp_btl->tcp_endpoints_mutex);
+            // need tcp_endpoints_mutex for this operation
             opal_list_append(&tcp_btl->tcp_endpoints, (opal_list_item_t *) tcp_endpoint);
             OPAL_THREAD_UNLOCK(&tcp_btl->tcp_endpoints_mutex);
         }
