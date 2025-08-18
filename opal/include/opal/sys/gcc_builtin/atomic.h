@@ -258,6 +258,9 @@ static inline void opal_atomic_unlock(opal_atomic_lock_t *lock)
             return __atomic_##name##_fetch(addr, value, __ATOMIC_RELAXED);                         \
         }
 
+OPAL_ATOMIC_DEFINE_OP(int16_t, 16, +, add)
+
+
 OPAL_ATOMIC_DEFINE_OP(int32_t, 32, +, add)
 OPAL_ATOMIC_DEFINE_OP(int32_t, 32, &, and)
 OPAL_ATOMIC_DEFINE_OP(int32_t, 32, |, or)

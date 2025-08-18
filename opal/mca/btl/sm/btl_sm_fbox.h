@@ -232,7 +232,7 @@ static inline bool mca_btl_sm_fbox_sendi(mca_btl_base_endpoint_t *ep, unsigned c
 
     opal_atomic_wmb();
     /* write out part of the header now. the tag will be written when the data is available */
-    mca_btl_sm_fbox_set_header(MCA_BTL_SM_FBOX_HDR(dst), tag, ep->fbox_out.seq++,
+    mca_btl_sm_fbox_set_header(MCA_BTL_SM_FBOX_HDR(dst), tag, opal_atomic_fetch_add_16(&ep->fbox_out.seq,1),
                                (uint32_t) data_size);
 
     return true;

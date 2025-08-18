@@ -21,6 +21,7 @@
 typedef volatile int opal_atomic_int_t;
 typedef volatile long opal_atomic_long_t;
 
+typedef volatile int16_t opal_atomic_int16_t;
 typedef volatile int32_t opal_atomic_int32_t;
 typedef volatile uint32_t opal_atomic_uint32_t;
 typedef volatile int64_t opal_atomic_int64_t;
