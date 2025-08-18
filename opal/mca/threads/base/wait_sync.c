@@ -115,7 +115,7 @@ check_status:
          * promoted as the progress manager.
          */
 
-        if (sync->count <= 0) { /* Completed? */
+        if (__atomic_load_n(&sync->count,__ATOMIC_RELAXED) <= 0) { /* Completed? */
             opal_thread_internal_mutex_unlock(&sync->lock);
             goto i_am_done;
         }
