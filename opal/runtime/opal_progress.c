@@ -44,6 +44,17 @@
 bool opal_progress_debug = false;
 #endif
 
+// detect if we use thread sanitizer
+#if defined(__has_feature)
+#  if __has_feature(thread_sanitizer)
+#    define TSAN_BUILD 1
+#  endif
+#endif
+#if defined(__SANITIZE_THREAD__) // GCC
+#  define TSAN_BUILD 1
+#endif
+
+
 /*
  * default parameters
  */
@@ -182,8 +193,9 @@ static int opal_progress_events(void)
 #    endif /* OPAL_PROGRESS_ONLY_USEC_NATIVE */
         /* trip the event library if we've reached our tick rate and we are
            enabled */
-        if (now - event_progress_last_time > event_progress_delta) {
-            event_progress_last_time = (num_event_users > 0) ? now - event_progress_delta : now;
+        if (now - __atomic_load_n(&event_progress_last_time,__ATOMIC_RELAXED) > event_progress_delta) {
+
+            __atomic_store_n(&event_progress_last_time,(num_event_users > 0) ? now - event_progress_delta : now,__ATOMIC_RELAXED);
 
             events += opal_event_loop(opal_sync_event_base, opal_progress_event_flag);
         }
@@ -196,7 +208,7 @@ static int opal_progress_events(void)
             events += opal_event_loop(opal_sync_event_base, opal_progress_event_flag);
         }
 #endif /* OPAL_PROGRESS_USE_TIMERS */
-        lock = 0;
+        __atomic_store_n(&lock,0,__ATOMIC_RELEASE);
     }
 
     return events;
@@ -229,8 +241,14 @@ int opal_progress(void)
      * atomic operations here, for performance reasons. In case of a race, the
      * number of calls may be inaccurate, but since it will eventually be incremented,
      * it's not a problem.
+     * When Building with Thread Sanitization, we use an atomic, to avoid a Tsan warning.
      */
+
+#ifdef TSAN_BUILD
+    if (((__atomic_add_fetch(&num_calls,1,__ATOMIC_RELAXED)) & 0x7) == 0) {
+#else
     if (((num_calls++) & 0x7) == 0) {
+#endif
         for (i = 0; i < callbacks_lp_len; ++i) {
             events += (callbacks_lp[i])();
         }
