@@ -100,9 +100,9 @@ extern bool ompi_enable_timing;
 static void fence_cbfunc(pmix_status_t status, void *cbdata)
 {
     volatile bool *active = (volatile bool*)cbdata;
-    OPAL_ACQUIRE_OBJECT(active);
-    *active = false;
-    OPAL_POST_OBJECT(active);
+    //OPAL_ACQUIRE_OBJECT(active);
+    __atomic_store_n(active,false,__ATOMIC_SEQ_CST);
+    //OPAL_POST_OBJECT(active);
 }
 
 int ompi_mpi_finalize(void)
@@ -273,8 +273,7 @@ int ompi_mpi_finalize(void)
        https://svn.open-mpi.org/trac/ompi/ticket/4669#comment:4 for
        more details). */
     if (!ompi_async_mpi_finalize && !opal_process_info.is_singleton) {
-        active = true;
-        OPAL_POST_OBJECT(&active);
+        __atomic_store_n(&active,true,__ATOMIC_RELEASE);
         /* Note that use of the non-blocking PMIx fence will
          * allow us to lazily cycle calling
          * opal_progress(), which will allow any other pending
@@ -286,9 +285,9 @@ int ompi_mpi_finalize(void)
             OMPI_ERROR_LOG(ret);
             /* Reset the active flag to false, to avoid waiting for
              * completion when the fence was failed. */
-            active = false;
+            __atomic_store_n(&active,false,__ATOMIC_RELEASE);
         }
-        OMPI_LAZY_WAIT_FOR_COMPLETION(active);
+        OMPI_ATOMIC_LAZY_WAIT_FOR_COMPLETION(active);
     }
 
     ompi_mpi_instance_finalize (&ompi_mpi_instance_default);
