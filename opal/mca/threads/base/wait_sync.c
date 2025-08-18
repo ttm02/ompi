@@ -62,7 +62,7 @@ int ompi_sync_wait_mt(ompi_wait_sync_t *sync)
      * race condition around the release of the synchronization using the
      * signaling field.
      */
-    if (sync->count <= 0) {
+    if (__atomic_load_n(&sync->count,__ATOMIC_RELAXED) <= 0) {
         return (0 == sync->status) ? OPAL_SUCCESS : OPAL_ERROR;
     }
 
@@ -73,7 +73,7 @@ int ompi_sync_wait_mt(ompi_wait_sync_t *sync)
      * call cond_signal.
      */
 
-        if (sync->count <= 0) {
+        if (__atomic_load_n(&sync->count,__ATOMIC_RELAXED) <= 0) {
             opal_thread_internal_mutex_unlock(&sync->lock);
             return (0 == sync->status) ? OPAL_SUCCESS : OPAL_ERROR;
         }
