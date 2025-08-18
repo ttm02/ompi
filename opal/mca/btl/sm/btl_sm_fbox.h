@@ -65,7 +65,7 @@ static inline void mca_btl_sm_endpoint_setup_fbox_send(struct mca_btl_base_endpo
 
     endpoint->fbox_out.start = 0;
     endpoint->fbox_out.end = 0;
-    endpoint->fbox_out.seq = 0;
+    __atomic_store_n(&endpoint->fbox_out.seq,0,__ATOMIC_RELAXED);
     endpoint->fbox_out.fbox = fbox;
 
     endpoint->fbox_out.metadata = (mca_btl_sm_fbox_metadata_t *) base;
@@ -74,9 +74,10 @@ static inline void mca_btl_sm_endpoint_setup_fbox_send(struct mca_btl_base_endpo
     endpoint->fbox_out.buffer = (unsigned char *)(endpoint->fbox_out.metadata + 1);
 
     /* zero out the first header in the fast box */
-    ((mca_btl_sm_fbox_hdr_t *)endpoint->fbox_out.buffer)->ival = 0;
+    //((mca_btl_sm_fbox_hdr_t *)endpoint->fbox_out.buffer)->ival = 0;
+    __atomic_store_n(&((mca_btl_sm_fbox_hdr_t *)endpoint->fbox_out.buffer)->ival,0,__ATOMIC_RELEASE);
 
-    opal_atomic_wmb();
+//    opal_atomic_wmb();
 }
 
 #define MCA_BTL_SM_FBOX_HDR(x) ((mca_btl_sm_fbox_hdr_t *) (x))
@@ -104,8 +105,10 @@ static inline void mca_btl_sm_fbox_set_header(mca_btl_sm_fbox_hdr_t *hdr, uint16
                                               uint16_t seq, uint32_t size)
 {
     mca_btl_sm_fbox_hdr_t tmp = {.data = {.tag = tag, .seq = seq, .size = size}};
-    opal_atomic_wmb();
-    hdr->ival = tmp.ival;
+    //opal_atomic_wmb();
+    //hdr->ival = tmp.ival;
+    __atomic_store_n(&hdr->ival,tmp.ival,__ATOMIC_RELEASE);
+
 }
 
 static inline mca_btl_sm_fbox_hdr_t mca_btl_sm_fbox_read_header(mca_btl_sm_fbox_hdr_t *hdr)
@@ -178,8 +181,8 @@ static inline unsigned char *mca_btl_sm_fbox_reserve_locked(mca_btl_base_endpoin
                 return NULL;
             }
 
-            MCA_BTL_SM_FBOX_HDR(ep->fbox_out.buffer)->ival = 0;
-            opal_atomic_wmb();
+            __atomic_store_n(&(MCA_BTL_SM_FBOX_HDR(ep->fbox_out.buffer)->ival),0,__ATOMIC_RELEASE);
+            //opal_atomic_wmb();
 
             BTL_VERBOSE(("writing a skip token at offset %u", old_end));
             /* space is available. go ahead and mark remaining space to skip */
@@ -201,8 +204,9 @@ static inline unsigned char *mca_btl_sm_fbox_reserve_locked(mca_btl_base_endpoin
     
     /* zero-out the next */
     if (buffer_free > aligned_entry_size) {
-        MCA_BTL_SM_FBOX_HDR(ep->fbox_out.buffer + (ep->fbox_out.end & fbox_offset_mask))->ival = 0;
-        opal_atomic_wmb();
+        __atomic_store_n(&(MCA_BTL_SM_FBOX_HDR(ep->fbox_out.buffer + (ep->fbox_out.end & fbox_offset_mask))->ival),0,__ATOMIC_RELEASE);
+        //MCA_BTL_SM_FBOX_HDR(ep->fbox_out.buffer + (ep->fbox_out.end & fbox_offset_mask))->ival = 0;
+        //opal_atomic_wmb();
     }
 
     return dst;
