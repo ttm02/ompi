@@ -761,7 +761,7 @@ static int ompi_mpi_instance_init_common (int argc, char **argv)
                 ret = opal_pmix_convert_status(rc);
                 return ompi_instance_print_error ("PMIx_Fence_nb() failed", ret);
             }
-            OMPI_LAZY_WAIT_FOR_COMPLETION(active);
+            OMPI_ATOMIC_LAZY_WAIT_FOR_COMPLETION(active);
         }
     }
 

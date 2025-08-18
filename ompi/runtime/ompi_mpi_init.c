@@ -331,9 +331,10 @@ void ompi_mpi_thread_level(int requested, int *provided)
 static void fence_release(pmix_status_t status, void *cbdata)
 {
     volatile bool *active = (volatile bool*)cbdata;
-    OPAL_ACQUIRE_OBJECT(active);
-    *active = false;
-    OPAL_POST_OBJECT(active);
+
+    //OPAL_ACQUIRE_OBJECT(active);
+    __atomic_store_n(active,false,__ATOMIC_SEQ_CST);
+    //OPAL_POST_OBJECT(active);
 }
 
 int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
@@ -486,7 +487,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
                 goto error;
             }
             /* cannot just wait on thread as we need to call opal_progress */
-            OMPI_LAZY_WAIT_FOR_COMPLETION(active);
+            OMPI_ATOMIC_LAZY_WAIT_FOR_COMPLETION(active);
         }
     }
 
@@ -551,7 +552,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
                 error = "PMIx_Fence_nb() failed";
                 goto error;
             }
-            OMPI_LAZY_WAIT_FOR_COMPLETION(active);
+            OMPI_ATOMIC_LAZY_WAIT_FOR_COMPLETION(active);
         }
     }
 
