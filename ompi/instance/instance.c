@@ -325,9 +325,9 @@ int ompi_mpi_instance_retain (void)
 static void fence_release(pmix_status_t status, void *cbdata)
 {
     volatile bool *active = (volatile bool*)cbdata;
-    OPAL_ACQUIRE_OBJECT(active);
-    *active = false;
-    OPAL_POST_OBJECT(active);
+    //OPAL_ACQUIRE_OBJECT(active);
+    __atomic_store_n(active,false,__ATOMIC_SEQ_CST);
+    //OPAL_POST_OBJECT(active);
 }
 
 static void evhandler_reg_callbk(pmix_status_t status,
@@ -606,7 +606,7 @@ static int ompi_mpi_instance_init_common (int argc, char **argv)
                 return ompi_instance_print_error ("PMIx_Fence() failed", ret);
             }
             /* cannot just wait on thread as we need to call opal_progress */
-            OMPI_LAZY_WAIT_FOR_COMPLETION(active);
+            OMPI_ATOMIC_LAZY_WAIT_FOR_COMPLETION(active);
         }
     }
 

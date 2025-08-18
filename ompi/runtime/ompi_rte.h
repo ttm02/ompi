@@ -281,6 +281,21 @@ OMPI_DECLSPEC void ompi_rte_wait_for_debugger(void);
         }                                                                   \
     }while(0);
 
+#define OMPI__ATOMIC_WAIT_FOR_COMPLETION(flg)                                       \
+do {                                                                    \
+while (__atomic_load_n(&(flg),__ATOMIC_RELAXED)) {                                                     \
+opal_progress();                                                \
+}                                                                   \
+}while(0);
+
+#define OMPI_ATOMIC_LAZY_WAIT_FOR_COMPLETION(flg)                                  \
+do {                                                                    \
+while (__atomic_load_n(&(flg),__ATOMIC_RELAXED)) {                                                     \
+opal_progress();                                                \
+usleep(100);                                                    \
+}                                                                   \
+}while(0);
+
 END_C_DECLS
 
 #endif /* OMPI_RTE_H_ */
