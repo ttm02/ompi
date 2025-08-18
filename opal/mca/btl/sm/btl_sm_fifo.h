@@ -86,20 +86,22 @@ static inline mca_btl_sm_hdr_t *sm_fifo_read(sm_fifo_t *fifo, struct mca_btl_bas
 
     fifo->fifo_head = SM_FIFO_FREE;
 
-    assert(hdr->next != value);
 
-    if (OPAL_UNLIKELY(SM_FIFO_FREE == hdr->next)) {
-        opal_atomic_rmb();
+
+    assert(__atomic_load_n(&hdr->next,__ATOMIC_RELAXED) != value);
+
+    if (OPAL_UNLIKELY(SM_FIFO_FREE == __atomic_load_n(&hdr->next,__ATOMIC_ACQUIRE))) {
+        //opal_atomic_rmb();
 
         if (!sm_item_compare_exchange(&fifo->fifo_tail, &value, SM_FIFO_FREE)) {
-            while (SM_FIFO_FREE == hdr->next) {
-                opal_atomic_rmb();
+            while (SM_FIFO_FREE == __atomic_load_n(&hdr->next,__ATOMIC_ACQUIRE)) {
+                //opal_atomic_rmb();
             }
 
-            fifo->fifo_head = hdr->next;
+            fifo->fifo_head = __atomic_load_n(&hdr->next,__ATOMIC_RELAXED);
         }
     } else {
-        fifo->fifo_head = hdr->next;
+        fifo->fifo_head = __atomic_load_n(&hdr->next,__ATOMIC_RELAXED);
     }
 
     opal_atomic_wmb();
@@ -131,7 +133,7 @@ static inline void sm_fifo_write(sm_fifo_t *fifo, fifo_value_t value)
         mca_btl_sm_hdr_t *hdr = (mca_btl_sm_hdr_t *) relative2virtual(prev);
          __atomic_store_n(&hdr->next,value,__ATOMIC_RELAXED);
     } else {
-        fifo->fifo_head = value;
+        __atomic_store_n(&fifo->fifo_head,value,__ATOMIC_RELAXED);
     }
 
     opal_atomic_wmb();
