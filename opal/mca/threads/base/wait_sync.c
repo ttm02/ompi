@@ -105,7 +105,7 @@ int ompi_sync_wait_mt(ompi_wait_sync_t *sync)
      *  - our sync has been triggered.
      */
 check_status:
-    if (sync != opal_threads_base_wait_sync_list && num_thread_in_progress >= opal_max_thread_in_progress) {
+    if (sync != opal_threads_base_wait_sync_list && __atomic_load_n(&num_thread_in_progress,__ATOMIC_RELAXED) >= opal_max_thread_in_progress) {
         opal_thread_internal_cond_wait(&sync->condition, &sync->lock);
 
         /**
