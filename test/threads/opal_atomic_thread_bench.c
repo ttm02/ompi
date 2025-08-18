@@ -117,7 +117,7 @@ static pthread_barrier_t barrier;
 #if !defined(OPAL_RESET_VAR)
 #    define OPAL_RESET_VAR(var)             \
         {                                   \
-            var = 0;                        \
+            __atomic_store_n(&var,0,__ATOMIC_RELAXED);                        \
             pthread_barrier_wait(&barrier); \
         }
 #endif
