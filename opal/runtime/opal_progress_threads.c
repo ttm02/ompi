@@ -100,7 +100,7 @@ static void *progress_engine(opal_object_t *obj)
     opal_thread_t *t = (opal_thread_t *) obj;
     opal_progress_tracker_t *trk = (opal_progress_tracker_t *) t->t_arg;
 
-    while (trk->ev_active) {
+    while (__atomic_load_n(&trk->ev_active,__ATOMIC_RELAXED)) {
         opal_event_loop(trk->ev_base, OPAL_EVLOOP_ONCE);
     }
 
@@ -109,8 +109,8 @@ static void *progress_engine(opal_object_t *obj)
 
 static void stop_progress_engine(opal_progress_tracker_t *trk)
 {
-    assert(trk->ev_active);
-    trk->ev_active = false;
+    assert(__atomic_load_n(&trk->ev_active,__ATOMIC_RELAXED));
+    __atomic_store_n(&trk->ev_active,false,__ATOMIC_RELEASE);
 
     /* break the event loop - this will cause the loop to exit upon
        completion of any current event */
