@@ -71,7 +71,8 @@ static inline void mca_btl_sm_endpoint_setup_fbox_send(struct mca_btl_base_endpo
     endpoint->fbox_out.metadata = (mca_btl_sm_fbox_metadata_t *) base;
     endpoint->fbox_out.metadata->start = 0;
 
-    endpoint->fbox_out.buffer = (unsigned char *)(endpoint->fbox_out.metadata + 1);
+    __atomic_store_n(&endpoint->fbox_out.buffer,(unsigned char *)(endpoint->fbox_out.metadata + 1),__ATOMIC_RELAXED);
+    //endpoint->fbox_out.buffer = (unsigned char *)(endpoint->fbox_out.metadata + 1);
 
     /* zero out the first header in the fast box */
     //((mca_btl_sm_fbox_hdr_t *)endpoint->fbox_out.buffer)->ival = 0;

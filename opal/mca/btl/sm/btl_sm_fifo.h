@@ -153,7 +153,7 @@ static inline void sm_fifo_write(sm_fifo_t *fifo, fifo_value_t value)
 static inline bool sm_fifo_write_ep(mca_btl_sm_hdr_t *hdr, struct mca_btl_base_endpoint_t *ep)
 {
     fifo_value_t rhdr = virtual2relative((char *) hdr);
-    if (ep->fbox_out.buffer) {
+    if (__atomic_load_n(&ep->fbox_out.buffer,__ATOMIC_RELAXED)) {
         /* if there is a fast box for this peer then use the fast box to send the fragment header.
          * this is done to ensure fragment ordering */
         opal_atomic_wmb();
