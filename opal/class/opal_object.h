@@ -275,7 +275,7 @@ static inline opal_object_t *opal_obj_new_debug(opal_class_t *type, const char *
             assert(NULL != ((opal_object_t *) (object))->obj_class);                 \
             assert(OPAL_OBJ_MAGIC_ID == ((opal_object_t *) (object))->obj_magic_id); \
             opal_obj_update((opal_object_t *) (object), 1);                          \
-            assert(((opal_object_t *) (object))->obj_reference_count >= 0);          \
+            assert(__atomic_load_n(&((opal_object_t *) (object))->obj_reference_count,__ATOMIC_RELAXED) >= 0);          \
         } while (0)
 #else
 #    define OBJ_RETAIN(object) opal_obj_update((opal_object_t *) (object), 1);
