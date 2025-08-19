@@ -185,7 +185,7 @@ static inline int64_t opal_atomic_swap_64(opal_atomic_int64_t *addr, int64_t new
 static inline intptr_t opal_atomic_swap_ptr(opal_atomic_intptr_t *addr, intptr_t newval)
 {
     intptr_t oldval;
-    __atomic_exchange(addr, &newval, &oldval, __ATOMIC_RELAXED);
+    __atomic_exchange(addr, &newval, &oldval, __ATOMIC_ACQ_REL);
     return oldval;
 }
 

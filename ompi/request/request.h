@@ -183,7 +183,7 @@ typedef struct ompi_predefined_request_t ompi_predefined_request_t;
     } while (0);
 
 
-#define REQUEST_COMPLETE(req)        (REQUEST_COMPLETED == __atomic_load_n(&(req)->req_complete,__ATOMIC_RELAXED))
+#define REQUEST_COMPLETE(req)        (REQUEST_COMPLETED == __atomic_load_n(&(req)->req_complete,__ATOMIC_ACQUIRE))
 /**
  * Finalize a request.  This is a macro to avoid function call
  * overhead, since this is typically invoked in the critical
@@ -537,6 +537,7 @@ static inline int ompi_request_complete(ompi_request_t* request, bool with_signa
                 wait_sync_update(tmp_sync, 1, request->req_status.MPI_ERROR);
             }
         } else {
+            assert(0 && "Not used in multi threaded build\n");
             request->req_complete = REQUEST_COMPLETED;
         }
     }

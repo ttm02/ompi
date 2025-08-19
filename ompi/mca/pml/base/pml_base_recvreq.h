@@ -103,7 +103,7 @@ OMPI_DECLSPEC OBJ_CLASS_DECLARATION(mca_pml_base_recv_request_t);
         (request)->req_base.req_ompi.req_status._ucount = 0;                    \
         (request)->req_base.req_ompi.req_status._cancelled = 0;                 \
                                                                                 \
-        (request)->req_base.req_ompi.req_complete = REQUEST_PENDING;            \
+        __atomic_store_n(&(request)->req_base.req_ompi.req_complete, REQUEST_PENDING,__ATOMIC_RELEASE);            \
         (request)->req_base.req_ompi.req_state = OMPI_REQUEST_ACTIVE;           \
     } while (0)
 
