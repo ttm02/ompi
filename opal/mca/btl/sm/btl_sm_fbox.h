@@ -61,6 +61,8 @@ static inline void mca_btl_sm_endpoint_setup_fbox_recv(struct mca_btl_base_endpo
 static inline void mca_btl_sm_endpoint_setup_fbox_send(struct mca_btl_base_endpoint_t *endpoint,
                                                        opal_free_list_item_t *fbox)
 {
+
+    OPAL_THREAD_LOCK(&endpoint->lock);
     void *base = fbox->ptr;
 
     endpoint->fbox_out.start = 0;
@@ -79,6 +81,7 @@ static inline void mca_btl_sm_endpoint_setup_fbox_send(struct mca_btl_base_endpo
     __atomic_store_n(&((mca_btl_sm_fbox_hdr_t *)endpoint->fbox_out.buffer)->ival,0,__ATOMIC_RELEASE);
 
 //    opal_atomic_wmb();
+    OPAL_THREAD_UNLOCK(&endpoint->lock);
 }
 
 #define MCA_BTL_SM_FBOX_HDR(x) ((mca_btl_sm_fbox_hdr_t *) (x))
@@ -134,7 +137,7 @@ static inline unsigned char *mca_btl_sm_fbox_reserve_locked(mca_btl_base_endpoin
 
     /* don't try to use the per-peer buffer for messages that will fill up more than 25% of the
      * buffer */
-    if (OPAL_UNLIKELY(NULL == ep->fbox_out.buffer || data_size > (fbox_size >> 2))) {
+    if (OPAL_UNLIKELY(NULL == __atomic_load_n(&ep->fbox_out.buffer,__ATOMIC_RELAXED) || data_size > (fbox_size >> 2))) {
         return NULL;
     }
 
@@ -327,7 +330,7 @@ static inline int mca_btl_sm_check_fboxes(void)
 
 static inline void mca_btl_sm_try_fbox_setup(mca_btl_base_endpoint_t *ep, mca_btl_sm_hdr_t *hdr)
 {
-    if (OPAL_UNLIKELY(NULL == ep->fbox_out.buffer
+    if (OPAL_UNLIKELY(NULL == __atomic_load_n(&ep->fbox_out.buffer,__ATOMIC_RELAXED)
                       && mca_btl_sm_component.fbox_threshold
                              == OPAL_THREAD_ADD_FETCH_SIZE_T(&ep->send_count, 1))) {
         /* protect access to mca_btl_sm_component.segment_offset */
