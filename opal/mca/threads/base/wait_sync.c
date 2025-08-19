@@ -125,7 +125,7 @@ check_status:
     opal_thread_internal_mutex_unlock(&sync->lock);
 
     OPAL_THREAD_ADD_FETCH32(&num_thread_in_progress, 1);
-    while (sync->count > 0) { /* progress till completion */
+    while (__atomic_load_n(&sync->count,__ATOMIC_RELAXED) > 0) { /* progress till completion */
         /* don't progress with the sync lock locked or you'll deadlock */
         opal_progress();
     }
