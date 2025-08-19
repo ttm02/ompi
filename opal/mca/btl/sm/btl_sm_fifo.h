@@ -72,39 +72,46 @@ static inline mca_btl_sm_hdr_t *sm_fifo_read(sm_fifo_t *fifo, struct mca_btl_bas
 {
     mca_btl_sm_hdr_t *hdr;
     fifo_value_t value;
+    fifo_value_t next_value;
 
-    if (SM_FIFO_FREE == fifo->fifo_head) {
+    value = opal_atomic_swap_ptr(&fifo->fifo_head, SM_FIFO_FREE);
+    // this also ensures no one else can read, as all other readers will see empty list
+
+    if (SM_FIFO_FREE == value) {
+        // list is empty
         return NULL;
     }
 
-    opal_atomic_rmb();
-
-    value = fifo->fifo_head;
+    //opal_atomic_rmb(); // encoded im memory order of prev operation
 
     *ep = &mca_btl_sm_component.endpoints[value >> MCA_BTL_SM_OFFSET_BITS];
     hdr = (mca_btl_sm_hdr_t *) relative2virtual(value);
 
-    fifo->fifo_head = SM_FIFO_FREE;
+//    fifo->fifo_head = SM_FIFO_FREE;
 
+    assert(__atomic_load_n(&hdr->next, __ATOMIC_RELAXED) != value);
 
+    if (OPAL_UNLIKELY(SM_FIFO_FREE == __atomic_load_n(&hdr->next, __ATOMIC_ACQUIRE))) {
+        // last element in list
+        // opal_atomic_rmb();
 
-    assert(__atomic_load_n(&hdr->next,__ATOMIC_RELAXED) != value);
-
-    if (OPAL_UNLIKELY(SM_FIFO_FREE == __atomic_load_n(&hdr->next,__ATOMIC_ACQUIRE))) {
-        //opal_atomic_rmb();
-
+        // last elem of list
         if (!sm_item_compare_exchange(&fifo->fifo_tail, &value, SM_FIFO_FREE)) {
-            while (SM_FIFO_FREE == __atomic_load_n(&hdr->next,__ATOMIC_ACQUIRE)) {
-                //opal_atomic_rmb();
+            while (SM_FIFO_FREE == __atomic_load_n(&hdr->next, __ATOMIC_ACQUIRE)) {
+                // opal_atomic_rmb();
+                // wait until producer has setup this list item
             }
 
-            fifo->fifo_head = __atomic_load_n(&hdr->next,__ATOMIC_RELAXED);
+            next_value = __atomic_load_n(&hdr->next, __ATOMIC_RELAXED);
+            __atomic_store_n(&fifo->fifo_head,next_value,__ATOMIC_RELEASE);
         }
     } else {
-        fifo->fifo_head = __atomic_load_n(&hdr->next,__ATOMIC_RELAXED);
+        // item has a next one
+        next_value = __atomic_load_n(&hdr->next, __ATOMIC_RELAXED);
+        __atomic_store_n(&fifo->fifo_head,next_value,__ATOMIC_RELEASE);
     }
 
-    opal_atomic_wmb();
+    //opal_atomic_wmb();
     return hdr;
 }
 
@@ -123,20 +130,20 @@ static inline void sm_fifo_write(sm_fifo_t *fifo, fifo_value_t value)
 {
     fifo_value_t prev;
 
-    opal_atomic_wmb();
+    // opal_atomic_wmb();// encoded in memory order of atomic swap
     prev = opal_atomic_swap_ptr(&fifo->fifo_tail, value);
-    opal_atomic_rmb();
+    // opal_atomic_rmb();
 
     assert(prev != value);
 
     if (OPAL_LIKELY(SM_FIFO_FREE != prev)) {
         mca_btl_sm_hdr_t *hdr = (mca_btl_sm_hdr_t *) relative2virtual(prev);
-         __atomic_store_n(&hdr->next,value,__ATOMIC_RELAXED);
+        __atomic_store_n(&hdr->next, value, __ATOMIC_RELEASE);
     } else {
-        __atomic_store_n(&fifo->fifo_head,value,__ATOMIC_RELAXED);
+        __atomic_store_n(&fifo->fifo_head, value, __ATOMIC_RELEASE);
     }
 
-    opal_atomic_wmb();
+    // opal_atomic_wmb();
 }
 
 /**
@@ -153,14 +160,14 @@ static inline void sm_fifo_write(sm_fifo_t *fifo, fifo_value_t value)
 static inline bool sm_fifo_write_ep(mca_btl_sm_hdr_t *hdr, struct mca_btl_base_endpoint_t *ep)
 {
     fifo_value_t rhdr = virtual2relative((char *) hdr);
-    if (__atomic_load_n(&ep->fbox_out.buffer,__ATOMIC_RELAXED)) {
+    if (__atomic_load_n(&ep->fbox_out.buffer, __ATOMIC_RELAXED)) {
         /* if there is a fast box for this peer then use the fast box to send the fragment header.
          * this is done to ensure fragment ordering */
         opal_atomic_wmb();
         return mca_btl_sm_fbox_sendi(ep, 0xfe, &rhdr, sizeof(rhdr), NULL, 0);
     }
     mca_btl_sm_try_fbox_setup(ep, hdr);
-    __atomic_store_n(&hdr->next,SM_FIFO_FREE,__ATOMIC_RELAXED);
+    __atomic_store_n(&hdr->next, SM_FIFO_FREE, __ATOMIC_RELEASE);
     sm_fifo_write(ep->fifo, rhdr);
 
     return true;
@@ -179,7 +186,7 @@ static inline bool sm_fifo_write_ep(mca_btl_sm_hdr_t *hdr, struct mca_btl_base_e
  */
 static inline void sm_fifo_write_back(mca_btl_sm_hdr_t *hdr, struct mca_btl_base_endpoint_t *ep)
 {
-    __atomic_store_n(&hdr->next,SM_FIFO_FREE,__ATOMIC_RELAXED);
+    __atomic_store_n(&hdr->next, SM_FIFO_FREE, __ATOMIC_RELEASE);
     sm_fifo_write(ep->fifo, virtual2relativepeer(ep, (char *) hdr));
 }
 
