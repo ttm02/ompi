@@ -537,7 +537,6 @@ static inline int ompi_request_complete(ompi_request_t* request, bool with_signa
                 wait_sync_update(tmp_sync, 1, request->req_status.MPI_ERROR);
             }
         } else {
-            assert(0 && "Not used in multi threaded build\n");
             request->req_complete = REQUEST_COMPLETED;
         }
     }
