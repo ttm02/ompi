@@ -566,7 +566,7 @@ static int mca_btl_sm_component_progress(void)
     mca_btl_sm_progress_endpoints();
 
     if (SM_FIFO_FREE == mca_btl_sm_component.my_fifo->fifo_head) {
-        lock = 0;
+        __atomic_store_n(&lock,0,__ATOMIC_RELEASE);
         return count;
     }
 

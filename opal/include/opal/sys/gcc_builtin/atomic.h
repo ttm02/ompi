@@ -167,18 +167,19 @@ static inline bool opal_atomic_compare_exchange_strong_128(opal_atomic_int128_t 
  * Swap
  *
  *********************************************************************/
+//TODO correct memory order for each access!
 
 static inline int32_t opal_atomic_swap_32(opal_atomic_int32_t *addr, int32_t newval)
 {
     int32_t oldval;
-    __atomic_exchange(addr, &newval, &oldval, __ATOMIC_RELAXED);
+    __atomic_exchange(addr, &newval, &oldval, __ATOMIC_ACQ_REL);
     return oldval;
 }
 
 static inline int64_t opal_atomic_swap_64(opal_atomic_int64_t *addr, int64_t newval)
 {
     int64_t oldval;
-    __atomic_exchange(addr, &newval, &oldval, __ATOMIC_RELAXED);
+    __atomic_exchange(addr, &newval, &oldval, __ATOMIC_ACQ_REL);
     return oldval;
 }
 
