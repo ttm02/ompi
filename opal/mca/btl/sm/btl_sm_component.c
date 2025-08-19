@@ -572,7 +572,7 @@ static int mca_btl_sm_component_progress(void)
 
     count += mca_btl_sm_poll_fifo();
     opal_atomic_mb();
-    lock = 0;
+    __atomic_store_n(&lock,0,__ATOMIC_RELEASE);
 
     return count;
 }
