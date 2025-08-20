@@ -81,7 +81,7 @@ static inline void opal_atomic_wmb(void)
 static inline bool opal_atomic_compare_exchange_strong_32(opal_atomic_int32_t *addr,
                                                           int32_t *oldval, int32_t newval)
 {
-    return __atomic_compare_exchange_n(addr, oldval, newval, false, __ATOMIC_ACQUIRE,
+    return __atomic_compare_exchange_n(addr, oldval, newval, false, __ATOMIC_ACQ_REL,
                                        __ATOMIC_RELAXED);
 }
 
@@ -102,7 +102,7 @@ static inline bool opal_atomic_compare_exchange_strong_rel_32(opal_atomic_int32_
 static inline bool opal_atomic_compare_exchange_strong_64(opal_atomic_int64_t *addr,
                                                           int64_t *oldval, int64_t newval)
 {
-    return __atomic_compare_exchange_n(addr, oldval, newval, false, __ATOMIC_ACQUIRE,
+    return __atomic_compare_exchange_n(addr, oldval, newval, false, __ATOMIC_ACQ_REL,
                                        __ATOMIC_RELAXED);
 }
 
