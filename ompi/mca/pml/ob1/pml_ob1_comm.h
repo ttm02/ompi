@@ -103,14 +103,15 @@ static inline mca_pml_ob1_comm_proc_t *mca_pml_ob1_peer_lookup(struct ompi_commu
                            " valid range of the communicator. Please submit a bug request!");
     }
 
-    if (OPAL_UNLIKELY(NULL == __atomic_load_n(&pml_comm->procs[rank], __ATOMIC_ACQUIRE))) {
+    mca_pml_ob1_comm_proc_t* peer = __atomic_load_n(&pml_comm->procs[rank], __ATOMIC_ACQUIRE);
+
+    if (OPAL_UNLIKELY(NULL == peer)) {
         // no need to guard creation by lock, as it is realized with an atomic ptr swap
-        mca_pml_ob1_peer_create(comm, pml_comm, rank);
+        peer = mca_pml_ob1_peer_create(comm, pml_comm, rank);
     }
 
-    assert(NULL != pml_comm->procs[rank]);
-    // no need for atomic operation, as we know no write will take place anymore
-    return pml_comm->procs[rank];
+    assert(NULL != __atomic_load_n(&pml_comm->procs[rank], __ATOMIC_ACQUIRE));
+    return peer;
 }
 
 /**
