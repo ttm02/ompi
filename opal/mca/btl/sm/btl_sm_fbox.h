@@ -190,7 +190,7 @@ static inline unsigned char *mca_btl_sm_fbox_reserve_locked(mca_btl_base_endpoin
 
             BTL_VERBOSE(("writing a skip token at offset %u", old_end));
             /* space is available. go ahead and mark remaining space to skip */
-            mca_btl_sm_fbox_set_header(MCA_BTL_SM_FBOX_HDR(dst), 0xff, ep->fbox_out.seq++,
+            mca_btl_sm_fbox_set_header(MCA_BTL_SM_FBOX_HDR(dst), 0xff, opal_atomic_fetch_add_16(&ep->fbox_out.seq,1),
                                        remaining - sizeof(mca_btl_sm_fbox_hdr_t));
             dst = ep->fbox_out.buffer;
         }
