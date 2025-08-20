@@ -34,15 +34,6 @@
 #include "opal/mca/threads/mutex.h"
 #include "opal/sys/atomic.h"
 
-#if defined(__has_feature)
-#  if __has_feature(thread_sanitizer)
-        #include <sanitizer/tsan_interface.h>
-// if not provided by header already:
-extern void __tsan_read_range(void *addr, unsigned long size);
-extern void __tsan_write_range(void *addr, unsigned long size);
-#  endif
-#endif
-
 BEGIN_C_DECLS
 
 /* NTH: temporarily suppress warnings about this not being defined */
@@ -147,13 +138,6 @@ static inline bool opal_lifo_is_empty(opal_lifo_t *lifo)
  */
 static inline opal_list_item_t *opal_lifo_push_atomic(opal_lifo_t *lifo, opal_list_item_t *item)
 {
-#if defined(__has_feature)
-#  if __has_feature(thread_sanitizer)
-    // double check, that there is no race on the item. item is now owned by the caller, so they should be able th access it freely
-    __tsan_write_range(item,sizeof(opal_list_item_t));
-#  endif
-#endif
-
     opal_counted_pointer_t old_head, new_head;
     do {
         opal_read_counted_pointer(&lifo->opal_lifo_head, &old_head);
@@ -195,13 +179,6 @@ static inline opal_list_item_t *opal_lifo_pop_atomic(opal_lifo_t *lifo)
                                                                              __ATOMIC_ACQUIRE))) {
             // opal_atomic_wmb();
             __atomic_store_n(&item->opal_list_next, NULL, __ATOMIC_RELEASE);
-
-#if defined(__has_feature)
-#  if __has_feature(thread_sanitizer)
-            // double check, that there is no race on the item. item is now owned by the caller, so they should be able th access it freely
-            __tsan_write_range(item,sizeof(opal_list_item_t));
-#  endif
-#endif
             return item;
         }
     } while (1);
