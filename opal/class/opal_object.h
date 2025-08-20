@@ -494,7 +494,7 @@ static inline opal_object_t *opal_obj_new(opal_class_t *cls)
 #else
     object = (opal_object_t *) malloc(cls->cls_sizeof);
 #endif
-    if (opal_class_init_epoch != cls->cls_initialized) {
+    if (opal_class_init_epoch != __atomic_load_n(&cls->cls_initialized,__ATOMIC_ACQUIRE)) {
         opal_class_initialize(cls);
     }
     if (NULL != object) {

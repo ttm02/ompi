@@ -84,7 +84,7 @@ void opal_class_initialize(opal_class_t *cls)
     /* Check to see if any other thread got in here and initialized
        this class before we got a chance to */
 
-    if (opal_class_init_epoch == cls->cls_initialized) {
+    if (opal_class_init_epoch == __atomic_load_n(&cls->cls_initialized,__ATOMIC_ACQUIRE)) {
         return;
     }
     opal_atomic_lock(&class_lock);
@@ -93,7 +93,7 @@ void opal_class_initialize(opal_class_t *cls)
        roughly the same time, it may have gotten the lock and
        initialized.  So check again. */
 
-    if (opal_class_init_epoch == cls->cls_initialized) {
+    if (opal_class_init_epoch == __atomic_load_n(&cls->cls_initialized,__ATOMIC_ACQUIRE)) {
         opal_atomic_unlock(&class_lock);
         return;
     }
@@ -151,7 +151,8 @@ void opal_class_initialize(opal_class_t *cls)
     }
     *cls_destruct_array = NULL; /* end marker for the destructors */
 
-    cls->cls_initialized = opal_class_init_epoch;
+    __atomic_store_n(&cls->cls_initialized, opal_class_init_epoch, __ATOMIC_RELEASE);
+    //cls->cls_initialized = opal_class_init_epoch;
     save_class(cls);
 
     /* All done */
