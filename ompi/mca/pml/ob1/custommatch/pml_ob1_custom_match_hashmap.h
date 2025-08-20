@@ -82,16 +82,7 @@ static inline int matching_hash_func(int tag, int peer)
     // tag may be negative on some internal communication
     return ((tag& mask) + peer) % NUM_BUCKETS;
 }
-/*
-static inline int custom_match_prq_cancel(custom_match_prq *list, void *req)
-{
-    assert(0 && "Not implemented");
-    // TODO implement
-    // this is the most inefficient operation, as we need to go through all buckets
-    // luckily we dont need to lock for that, as if another T matches in the mean time cancel just
-    // does nothing
-    return 0;
-}*/
+
 
 static inline void* to_memory_pool(hashmap *map, bucket_node *node)
 {
@@ -201,7 +192,7 @@ static inline void custom_match_prq_cancel(hashmap* map, void* payload)
 
 // Notes for a lock-free design:
 // problem: lock-free linked list require more effort e.g. an extra marker to mark node as invalid,
-// otherwise, other T can modify the node whie we are removing it even besser solution: encode
+// otherwise, other T can modify the node while we are removing it even besser solution: encode
 // is_recv in first bit of ptr, as than it is actually part of the CAS if one wants to be 100%
 // secure: the get_memory checks if malloc returns something where first bit of actual ptr is 0
 
@@ -233,13 +224,10 @@ static inline void *remove_from_list(struct bucket *my_bucket)
     return elem_to_dequeue;
 }
 
-// TODO can i force the compiler to instantiate a "templated" version where is_recv is template
-// parameter?
-
 // returns the match (and removed matched from queue)
 // or inserts into the queue if no match and returns void
 // basically combining the different matching queues
-// to_fill will be set to void** where teh actual payload data needs to be dropped, if elem is inserted
+// to_fill will be set to void** where the actual payload data needs to be dropped, if elem is inserted
 static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void*** to_fill, bool is_recv)
 {
 #if CUSTOM_MATCH_DEBUG_VERBOSE
