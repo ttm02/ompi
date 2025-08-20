@@ -95,7 +95,7 @@ static inline int custom_match_prq_cancel(custom_match_prq *list, void *req)
 
 static inline void* to_memory_pool(hashmap *map, bucket_node *node)
 {
-    void* retval = __atomic_load_n(&node->value,__ATOMIC_RELAXED);
+    void* retval = __atomic_load_n(&node->value,__ATOMIC_ACQUIRE);
     while (NULL == retval) {
         // wait until other thread has finished initializing this value
         retval=__atomic_load_n(&node->value,__ATOMIC_ACQUIRE);
