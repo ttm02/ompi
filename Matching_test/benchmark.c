@@ -124,7 +124,7 @@ int main(int argc, char **argv)
     MPI_Reduce(&elapsed, &elapsed_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
-        double total_msg = 2 * (double) iterations * nthreads;
+        double total_msg = 2.0 * (iterations-warmup) * nthreads;
         printf("Threads=%d, iters=%ld per thread, msg_size=%d bytes: Time=%.6f s, Throughput=%.3f "
                "Msg/s\n",
                nthreads, iterations, msg_size, elapsed_max, total_msg / elapsed_max);
