@@ -45,6 +45,13 @@ int main(int argc, char **argv) {
         }
     }
 
+/*
+    MPI_Info info;
+    MPI_Info_create(&info);
+    MPI_Info_set(info,"MPI_ASSERT_ALLOW_OVERTAKING","true");
+    MPI_Comm_set_info(MPI_COMM_WORLD, info);
+    MPI_Info_free(&info);
+*/
     omp_set_num_threads(nthreads);
 // communication partners
         int next = (rank + 1) % world_size;
@@ -80,6 +87,7 @@ int main(int argc, char **argv) {
             MPI_Isend(sbuf2, msg_size, MPI_BYTE, prev, tag, MPI_COMM_WORLD, &reqs[3]);
 
             MPI_Waitall(4, reqs, stats);
+//#pragma omp barrier
         }
         free(sbuf);
         free(rbuf);
