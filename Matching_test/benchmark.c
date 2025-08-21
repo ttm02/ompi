@@ -101,9 +101,9 @@ int main(int argc, char **argv) {
 
     if (rank == 0) {
         double elapsed = diff_time(t0, t1);
-        double total_ops = (double)iterations * nthreads;
-        printf("Threads=%d, iters=%ld per thread, msg_size=%d bytes: Time=%.6f s, Throughput=%.3f Mops/s\n",
-               nthreads, iterations, msg_size, elapsed, total_ops / elapsed / 1e6);
+        double total_msg = 2*(double)iterations * nthreads;
+        printf("Threads=%d, iters=%ld per thread, msg_size=%d bytes: Time=%.6f s, Throughput=%.3f Msg/s\n",
+               nthreads, iterations, msg_size, elapsed, total_msg / elapsed );
     }
     MPI_Finalize();
     return 0;
