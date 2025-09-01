@@ -115,7 +115,7 @@ int main(int argc, char **argv)
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
 #pragma omp parallel for reduction(+ : prq_appends, prq_dequeues, umq_appends, umq_dequeues) \
-    firstprivate(pq_size, uq_size, pq_max, uq_max)
+    firstprivate(pq_size, uq_size) reduction(max:pq_max, uq_max)
     for (long i = 0; i < num_ops; ++i) {
         const int tag = tags[rand_r(&srand_buffer[omp_get_thread_num()]) % num_tags];
         const int src = ranks[rand_r(&srand_buffer[omp_get_thread_num()]) % num_ranks];
