@@ -75,7 +75,7 @@ int main(int argc, char **argv)
     //        printf("Rank %d with %d and %d\n",rank,next,prev);
 
     // Synchronize before starting
-    //    MPI_Barrier(MPI_COMM_WORLD);
+
     // TODO barrier leads to wildcard recv???
 
     double t0;
@@ -98,7 +98,10 @@ int main(int argc, char **argv)
             if (i == warmup) { // wait for all threads
 #pragma omp barrier
 #pragma omp master
-                t0 = MPI_Wtime();
+                {
+                    t0 = MPI_Wtime();
+                    MPI_Barrier(MPI_COMM_WORLD);
+                }// implicit openmp barrier
             }
 
             // halo exchange like benchmark
