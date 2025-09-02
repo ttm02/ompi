@@ -95,6 +95,9 @@ int main(int argc, char **argv)
     // random seed
     srand((unsigned) time(NULL));
     unsigned int *srand_buffer = malloc(sizeof(unsigned int) * num_t);
+    for (int i = 0; i < num_t; ++i) {
+        srand_buffer[i] = rand();
+    }
 
     int *tags = get_value_pool(num_tags, tag_pool_range);
     int *ranks = get_value_pool(num_ranks, rank_pool_range);
