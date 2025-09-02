@@ -50,7 +50,7 @@ int main(int argc, char **argv)
             msg_size = atoi(optarg);
             break;
         case 'w':
-            msg_size = atoi(optarg);
+            warmup = atoi(optarg);
             break;
         default:
             if (rank == 0)
@@ -61,13 +61,13 @@ int main(int argc, char **argv)
         }
     }
 
-    /*
+
         MPI_Info info;
         MPI_Info_create(&info);
         MPI_Info_set(info,"MPI_ASSERT_ALLOW_OVERTAKING","true");
         MPI_Comm_set_info(MPI_COMM_WORLD, info);
         MPI_Info_free(&info);
-    */
+
     omp_set_num_threads(nthreads);
     // communication partners
     int next = (rank + 1) % world_size;
