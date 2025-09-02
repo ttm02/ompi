@@ -1,4 +1,6 @@
-// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I..  -I../3rd-party/openpmix/include matching_performance.c -Wno-format ../opal/class/.libs/opal_object.o ../opal/mca/threads/base/.libs/mutex.o ../opal/mca/threads/pthreads/.libs/threads_pthreads_module.o -lpthread
+// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I..
+// -I../3rd-party/openpmix/include matching_performance.c -Wno-format ../opal/.libs/libopen-pal.so
+// -lpthread -fopenmp
 /*
  * PRQ/UMQ Performance Test
  * Simulates message-arrival and receive-posted operations
@@ -12,18 +14,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-// forward declare to remove problem with include ordering when including this internal header
-struct custom_match_prq;
-struct custom_match_umq;
-typedef struct custom_match_prq custom_match_prq;
-typedef struct custom_match_umq custom_match_umq;
-// dont use variable, just use locking for testing
-bool mca_pml_ob1_matching_protection =true;
-
-#define NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
-
-#include "../ompi/mca/pml/ob1/custommatch/pml_ob1_custom_match_linkedlist.h"
-//#include "../ompi/mca/pml/ob1/custommatch/pml_ob1_custom_match_arrays.h"
+#include "original_matching_queue.h"
 
 // from https://stackoverflow.com/questions/6127503/shuffle-array-in-c
 /* Arrange the N elements of ARRAY in random order.
@@ -64,6 +55,7 @@ int *get_value_pool(int num_vals, int pool_range)
     free(pool);
     return values;
 }
+
 int main(int argc, char **argv)
 {
     int opt;
@@ -91,8 +83,7 @@ int main(int argc, char **argv)
     int *tags = get_value_pool(num_tags, tag_pool_range);
     int *ranks = get_value_pool(num_ranks, rank_pool_range);
 
-    custom_match_prq *pq = custom_match_prq_init();
-    custom_match_umq *uq = custom_match_umq_init();
+    matching_data *matching_queue = init_matching_queues();
 
     long prq_appends = 0, prq_dequeues = 0;
     long umq_appends = 0, umq_dequeues = 0;
@@ -104,39 +95,30 @@ int main(int argc, char **argv)
     for (long i = 0; i < num_ops; ++i) {
         int tag = tags[rand() % num_tags];
         int src = ranks[rand() % num_ranks];
-        void *payload = (void *) (uintptr_t) i+1; // not null palyoad
+        void *payload = (void *) (uintptr_t) i + 1; // not null palyoad
         if (rand() % 2 == 1) {
             // Operation 1: message arrival
             // search posted receives (PRQ)
-            void *recv_req = custom_match_prq_find_dequeue_verify(pq, tag, src);
-            prq_dequeues++;
-            if (recv_req) {
-                pq_size--; // removed from queue
+            if (try_match_incoming(matching_queue, tag, src, payload)) {
+                --pq_size;
+                prq_dequeues++;
             } else {
-                // no match => enqueue to unexpected queue
-                custom_match_umq_append(uq, tag, src, payload);
                 umq_appends++;
-                uq_size++;
-                if (uq_size > uq_max)
+                ++uq_size;
+                if (uq_size > uq_max) {
                     uq_max = uq_size;
+                }
             }
         } else {
             // Operation 2: receive posted
             // search unexpected messages (UMQ)
-            custom_match_umq_node *hold_prev;
-            custom_match_umq_node *hold_elem;
-            int hold_index;
-            void *msg_found = custom_match_umq_find_verify_hold(uq, tag, src, &hold_prev,
-                                                                &hold_elem, &hold_index);
-            umq_dequeues++;
-            if (msg_found) {
+
+            if (try_match_receive(matching_queue, tag, src, payload)) {
                 // matched => do nothing else
+                umq_dequeues++;
                 uq_size--;
-                custom_match_umq_remove_hold(uq, hold_prev, hold_elem,
-                                             hold_index); // actually remove
             } else {
                 // not found => post receive into PRQ
-                custom_match_prq_append(pq, payload, tag, src);
                 prq_appends++;
                 pq_size++;
                 if (pq_size > pq_max)
@@ -156,7 +138,6 @@ int main(int argc, char **argv)
     free(tags);
     free(ranks);
 
-    custom_match_prq_destroy(pq);
-    custom_match_umq_destroy(uq);
+    destroy_matching_queues(matching_queue);
     return 0;
 }
