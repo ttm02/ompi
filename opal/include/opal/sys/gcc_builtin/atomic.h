@@ -37,11 +37,11 @@
  *********************************************************************/
 
 #if defined(PLATFORM_ARCH_X86_64) && defined(PLATFORM_COMPILER_GNU) && __GNUC__ < 8
-    /* work around a bug in older gcc versions where ACQUIRE seems to get
-     * treated as a no-op instead */
-#define OPAL_BUSTED_ATOMIC_MB 1
+/* work around a bug in older gcc versions where ACQUIRE seems to get
+ * treated as a no-op instead */
+#    define OPAL_BUSTED_ATOMIC_MB 1
 #else
-#define OPAL_BUSTED_ATOMIC_MB 0
+#    define OPAL_BUSTED_ATOMIC_MB 0
 #endif
 
 static inline void opal_atomic_mb(void)
@@ -62,7 +62,6 @@ static inline void opal_atomic_wmb(void)
 {
     __atomic_thread_fence(__ATOMIC_RELEASE);
 }
-
 
 /**********************************************************************
  *
@@ -123,25 +122,23 @@ static inline bool opal_atomic_compare_exchange_strong_rel_64(opal_atomic_int64_
 #include "opal/sys/atomic_impl_ptr_cswap.h"
 
 #if OPAL_HAVE_GCC_BUILTIN_CSWAP_INT128
-
 #    define OPAL_HAVE_ATOMIC_COMPARE_EXCHANGE_128 1
 
 static inline bool opal_atomic_compare_exchange_strong_acq_128(opal_atomic_int128_t *addr,
-                                                           opal_int128_t *oldval,
-                                                           opal_int128_t newval)
+                                                               opal_int128_t *oldval,
+                                                               opal_int128_t newval)
 {
     return __atomic_compare_exchange_n(addr, oldval, newval, false, __ATOMIC_ACQUIRE,
                                        __ATOMIC_RELAXED);
 }
 
 static inline bool opal_atomic_compare_exchange_strong_rel_128(opal_atomic_int128_t *addr,
-                                                           opal_int128_t *oldval,
-                                                           opal_int128_t newval)
+                                                               opal_int128_t *oldval,
+                                                               opal_int128_t newval)
 {
     return __atomic_compare_exchange_n(addr, oldval, newval, false, __ATOMIC_RELEASE,
                                        __ATOMIC_RELAXED);
 }
-
 
 #elif defined(OPAL_HAVE_SYNC_BUILTIN_CSWAP_INT128) && OPAL_HAVE_SYNC_BUILTIN_CSWAP_INT128
 
@@ -158,16 +155,28 @@ static inline bool opal_atomic_compare_exchange_strong_128(opal_atomic_int128_t 
     *oldval = prev;
     return ret;
 }
+static inline bool opal_atomic_compare_exchange_strong_acq_128(opal_atomic_int128_t *addr,
+                                                               opal_int128_t *oldval,
+                                                               opal_int128_t newval)
+{
+    return opal_atomic_compare_exchange_strong_128(addr, oldval, newval);
+}
+
+static inline bool opal_atomic_compare_exchange_strong_rel_128(opal_atomic_int128_t *addr,
+                                                               opal_int128_t *oldval,
+                                                               opal_int128_t newval)
+{
+    return opal_atomic_compare_exchange_strong_128(addr, oldval, newval);
+}
 
 #endif
-
 
 /**********************************************************************
  *
  * Swap
  *
  *********************************************************************/
-//TODO correct memory order for each access!
+// TODO correct memory order for each access!
 
 static inline int32_t opal_atomic_swap_32(opal_atomic_int32_t *addr, int32_t newval)
 {
@@ -189,7 +198,6 @@ static inline intptr_t opal_atomic_swap_ptr(opal_atomic_intptr_t *addr, intptr_t
     __atomic_exchange(addr, &newval, &oldval, __ATOMIC_ACQ_REL);
     return oldval;
 }
-
 
 /**********************************************************************
  *
@@ -231,16 +239,14 @@ static inline void opal_atomic_lock(opal_atomic_lock_t *lock)
 
 static inline void opal_atomic_unlock(opal_atomic_lock_t *lock)
 {
-    __atomic_store_n(&lock, OPAL_ATOMIC_LOCK_UNLOCKED,
-                     __ATOMIC_RELEASE | __ATOMIC_HLE_RELEASE);
+    __atomic_store_n(&lock, OPAL_ATOMIC_LOCK_UNLOCKED, __ATOMIC_RELEASE | __ATOMIC_HLE_RELEASE);
 }
 
-#else  /* #if defined(__HLE__) */
+#else /* #if defined(__HLE__) */
 
-#include "opal/sys/atomic_impl_spinlock.h"
+#    include "opal/sys/atomic_impl_spinlock.h"
 
 #endif
-
 
 /**********************************************************************
  *
@@ -248,19 +254,18 @@ static inline void opal_atomic_unlock(opal_atomic_lock_t *lock)
  *
  *********************************************************************/
 
-#define OPAL_ATOMIC_DEFINE_OP(type, bits, operator, name)                                          \
-        static inline type opal_atomic_fetch_##name##_##bits(opal_atomic_##type *addr, type value) \
-        {                                                                                          \
-            return __atomic_fetch_##name(addr, value, __ATOMIC_RELAXED);                           \
-        }                                                                                          \
-                                                                                                   \
-        static inline type opal_atomic_##name##_fetch_##bits(opal_atomic_##type *addr, type value) \
-        {                                                                                          \
-            return __atomic_##name##_fetch(addr, value, __ATOMIC_RELAXED);                         \
-        }
+#define OPAL_ATOMIC_DEFINE_OP(type, bits, operator, name)                                      \
+    static inline type opal_atomic_fetch_##name##_##bits(opal_atomic_##type *addr, type value) \
+    {                                                                                          \
+        return __atomic_fetch_##name(addr, value, __ATOMIC_RELAXED);                           \
+    }                                                                                          \
+                                                                                               \
+    static inline type opal_atomic_##name##_fetch_##bits(opal_atomic_##type *addr, type value) \
+    {                                                                                          \
+        return __atomic_##name##_fetch(addr, value, __ATOMIC_RELAXED);                         \
+    }
 
 OPAL_ATOMIC_DEFINE_OP(int16_t, 16, +, add)
-
 
 OPAL_ATOMIC_DEFINE_OP(int32_t, 32, +, add)
 OPAL_ATOMIC_DEFINE_OP(int32_t, 32, &, and)
@@ -277,8 +282,7 @@ OPAL_ATOMIC_DEFINE_OP(int64_t, 64, -, sub)
 OPAL_ATOMIC_DEFINE_OP(size_t, size_t, +, add)
 OPAL_ATOMIC_DEFINE_OP(size_t, size_t, -, sub)
 
-#define opal_atomic_add(ADDR, VALUE) \
-     (void) __atomic_fetch_add(ADDR, VALUE, __ATOMIC_RELAXED)
+#define opal_atomic_add(ADDR, VALUE) (void) __atomic_fetch_add(ADDR, VALUE, __ATOMIC_RELAXED)
 
 #include "opal/sys/atomic_impl_minmax_math.h"
 
