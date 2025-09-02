@@ -233,6 +233,7 @@ static inline void *remove_from_list(struct bucket *my_bucket)
     return elem_to_dequeue;
 }
 
+#ifdef WILDCARD_SUPPORT
 static inline void *try_match_from_wildcard_umq(hashmap *map, int tag, int peer)
 {
     // TODO evaluate performance when this has its own lock, this currently shares the lock with the memory pool
@@ -324,6 +325,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
     return NULL;
 
 }
+#endif
 
 // returns the match (and removed matched from queue)
 // or inserts into the queue if no match and returns void
