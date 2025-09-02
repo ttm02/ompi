@@ -8,13 +8,18 @@
  */
 #include <assert.h>
 #include <getopt.h>
+#include <omp.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
-#include "original_matching_queue.h"
+#ifndef USE_HASHMAP
+#    include "original_matching_queue.h"
+#else
+#    include "hashmap_matching_queue.h"
+#endif
 
 // from https://stackoverflow.com/questions/6127503/shuffle-array-in-c
 /* Arrange the N elements of ARRAY in random order.
@@ -78,7 +83,18 @@ int main(int argc, char **argv)
         }
     }
     // random seed
+    int num_t = 1;
+#pragma omp parallel
+    {
+#pragma omp master
+        {
+            num_t = omp_get_num_threads();
+        }
+    }
+
+    // random seed
     srand((unsigned) time(NULL));
+    unsigned int *srand_buffer = malloc(sizeof(unsigned int) * num_t);
 
     int *tags = get_value_pool(num_tags, tag_pool_range);
     int *ranks = get_value_pool(num_ranks, rank_pool_range);
@@ -92,11 +108,14 @@ int main(int argc, char **argv)
 
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
+#pragma omp parallel for schedule(static)                               \
+    reduction(+ : prq_appends, prq_dequeues, umq_appends, umq_dequeues) \
+    firstprivate(pq_size, uq_size) reduction(max : pq_max, uq_max)
     for (long i = 0; i < num_ops; ++i) {
-        int tag = tags[rand() % num_tags];
-        int src = ranks[rand() % num_ranks];
+        int tag = tags[rand_r(&srand_buffer[omp_get_thread_num()]) % num_tags];
+        int src = ranks[rand_r(&srand_buffer[omp_get_thread_num()]) % num_ranks];
         void *payload = (void *) (uintptr_t) i + 1; // not null palyoad
-        if (rand() % 2 == 1) {
+        if (rand_r(&srand_buffer[omp_get_thread_num()]) % 2 == 1) {
             // Operation 1: message arrival
             // search posted receives (PRQ)
             if (try_match_incoming(matching_queue, tag, src, payload)) {
