@@ -1,11 +1,11 @@
-// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I..
-// -I../3rd-party/openpmix/include matching_performance.c -Wno-format ../opal/.libs/libopen-pal.so
-// -lpthread -fopenmp
+// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread -fopenmp
 /*
  * PRQ/UMQ Performance Test
  * Simulates message-arrival and receive-posted operations
  * Usage: ./bench -n <num_ops> -t <tag_range> -r <rank_range>
  */
+#include "../ompi/mca/pml/pml_constants.h"
+
 #include <assert.h>
 #include <getopt.h>
 #include <omp.h>
@@ -14,6 +14,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+
+
+//#define USE_HASHMAP
+#define USE_WILDCARD_RANK
+#define USE_WILDCARD_TAG
+
 
 #ifndef USE_HASHMAP
 #    include "original_matching_queue.h"
@@ -101,6 +107,12 @@ int main(int argc, char **argv)
 
     int *tags = get_value_pool(num_tags, tag_pool_range);
     int *ranks = get_value_pool(num_ranks, rank_pool_range);
+#ifdef USE_WILDCARD_RANK
+    tags[0]=OMPI_ANY_TAG;
+#endif
+#ifdef USE_WILDCARD_RANK
+    ranks[0]=OMPI_ANY_SOURCE;
+#endif
 
     matching_data *matching_queue = init_matching_queues();
 
@@ -117,8 +129,10 @@ int main(int argc, char **argv)
     for (long i = 0; i < num_ops; ++i) {
         int tag = tags[rand_r(&srand_buffer[omp_get_thread_num()]) % num_tags];
         int src = ranks[rand_r(&srand_buffer[omp_get_thread_num()]) % num_ranks];
+
         void *payload = (void *) (uintptr_t) i + 1; // not null palyoad
-        if (rand_r(&srand_buffer[omp_get_thread_num()]) % 2 == 1) {
+        if (rand_r(&srand_buffer[omp_get_thread_num()]) % 2 == 1 && tag!=OMPI_ANY_TAG && src!=OMPI_ANY_SOURCE) {
+            // any tag operations: must be recv
             // Operation 1: message arrival
             // search posted receives (PRQ)
             if (try_match_incoming(matching_queue, tag, src, payload)) {
