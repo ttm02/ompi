@@ -12,7 +12,7 @@
  */
 #ifdef NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
 #define PML_OB1_CUSTOM_MATCH_H
-// performance testing should not include this header asperformance benchmark will select implementation itself
+// performance testing should not include this header as performance benchmark will select implementation itself
 #endif
 
 #ifndef PML_OB1_CUSTOM_MATCH_H

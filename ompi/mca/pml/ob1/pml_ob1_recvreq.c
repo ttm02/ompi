@@ -1326,9 +1326,15 @@ void mca_pml_ob1_recv_req_start(mca_pml_ob1_recv_request_t *req)
     if(req->req_recv.req_base.req_peer == OMPI_ANY_SOURCE) {// disabled branch per assertion
 
 #if MCA_PML_OB1_CUSTOM_MATCH
-        printf("ERROR: Matching algo does not support wildcards\n");
-        exit(-1);
-        //frag = recv_req_match_wild(req, &proc, &hold_prev, &hold_elem, &hold_index);// assume no lock  and not called
+        frag = get_match_or_insert(req->req_recv.req_base.req_comm->c_pml_comm->prq,
+                                         req->req_recv.req_base.req_tag,
+                                         req->req_recv.req_base.req_peer,&to_insert,true);
+        if (frag) {
+            mca_pml_ob1_comm_proc_t **procp = (mca_pml_ob1_comm_proc_t **) comm->c_pml_comm->procs;
+            proc = procp[frag->hdr.hdr_match.hdr_src];
+            req->req_recv.req_base.req_proc = procp[frag->hdr.hdr_match.hdr_src]->ompi_proc;
+            prepare_recv_req_converter(req);
+        }
 #else
         frag = recv_req_match_wild(req, &proc);
         queue = &ob1_comm->wild_receives;
