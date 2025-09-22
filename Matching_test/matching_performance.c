@@ -171,10 +171,11 @@ void run_experiment(const int num_ops, const int * operations,
 int main(int argc, char **argv)
 {
     int opt;
-    long num_ops = 100000;
+    int num_ops = 100000;
     int num_tags = 100;
     int num_ranks = 20;
-    while ((opt = getopt(argc, argv, "n:t:r:")) != -1) {
+    int repititions =3;
+    while ((opt = getopt(argc, argv, "n:t:p:r:")) != -1) {
         switch (opt) {
         case 'n':
             num_ops = atol(optarg);
@@ -182,8 +183,11 @@ int main(int argc, char **argv)
         case 't':
             num_tags = atoi(optarg);
             break;
-        case 'r':
+        case 'p':
             num_ranks = atoi(optarg);
+            break;
+        case 'r':
+            repititions = atoi(optarg);
             break;
         }
     }
@@ -197,27 +201,29 @@ int main(int argc, char **argv)
 
     printf("Run with %d Threads\n",num_threads);
 
-    int* operations = prepare_envelopes(num_ops, num_tags, num_ranks, false);
+    for (int i=0;i<repititions;++i) {
+        int* operations = prepare_envelopes(num_ops, num_tags, num_ranks, false);
 
-    printf("\nNo Wildcards: Default Implementation:\n");
-    run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
-    printf("\nNo Wildcards: Hashmap Implementation (build with NO wildcard support):\n");
-    run_experiment(num_ops,operations,&hashmap_no_wild_init_matching_queues,&hashmap_no_wild_destroy_matching_queues,&hashmap_no_wild_try_match_incoming,&hashmap_no_wild_try_match_receive);
-    printf("\nNo Wildcards: Hashmap Implementation (build with wildcard support):\n");
-    run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
+        printf("\nNo Wildcards: Default Implementation:\n");
+        run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
+        printf("\nNo Wildcards: Hashmap Implementation (build with NO wildcard support):\n");
+        run_experiment(num_ops,operations,&hashmap_no_wild_init_matching_queues,&hashmap_no_wild_destroy_matching_queues,&hashmap_no_wild_try_match_incoming,&hashmap_no_wild_try_match_receive);
+        printf("\nNo Wildcards: Hashmap Implementation (build with wildcard support):\n");
+        run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
 
 
-    free(operations);
-    // with wildcards
-    printf("\n");
-    operations = prepare_envelopes(num_ops, num_tags, num_ranks, true);
+        free(operations);
+        // with wildcards
+        printf("\n");
+        operations = prepare_envelopes(num_ops, num_tags, num_ranks, true);
 
-    printf("\nWith Wildcards: Default Implementation:\n");
-    run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
-    printf("\nWith Wildcards: Hashmap Implementation:\n");
-    run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
+        printf("\nWith Wildcards: Default Implementation:\n");
+        run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
+        printf("\nWith Wildcards: Hashmap Implementation:\n");
+        run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
 
-    free(operations);
+        free(operations);
+    }
 
     return 0;
 }
