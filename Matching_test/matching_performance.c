@@ -1,4 +1,4 @@
-// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread -fopenmp
+// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c original_matching_queue.c hashmap_matching_queue.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread -fopenmp
 /*
  * PRQ/UMQ Performance Test
  * Simulates message-arrival and receive-posted operations
@@ -18,6 +18,9 @@
 
 #include "original_matching_queue.h"
 #include "hashmap_matching_queue.h"
+
+// switch on mpi internal locking
+bool mca_pml_ob1_matching_protection = true;
 
 
 // from https://stackoverflow.com/questions/6127503/shuffle-array-in-c
@@ -147,8 +150,8 @@ void run_experiment(const int num_ops, const int * operations,
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
     double total_ms = diff_nsec(&t0, &t1) / 1e6;
-    double ops_per_sec = num_ops / (total_ms / 1000.0);
-    printf("Number of Operations: %ld in %.3f ms (%ld ops/sec)\n", num_ops, total_ms,ops_per_sec);
+    double ops_per_sec = (double)num_ops / (total_ms / 1000.0);
+    printf("Number of Operations: %d in %.3f ms (%f ops/sec)\n", num_ops, total_ms,ops_per_sec);
     printf("PRQ appends: %ld, PRQ dequeues: %ld, PRQ max size: %d\n", prq_appends, prq_dequeues,
            pq_max);
     printf("UMQ appends: %ld, UMQ dequeues: %ld, UMQ max size: %d\n", umq_appends, umq_dequeues,
@@ -182,9 +185,9 @@ int main(int argc, char **argv)
 
     int* operations = prepare_envelopes(num_ops, num_tags, num_ranks, false);
 
-    printf("No Wildcards: Default Implementation:\n");
+    printf("\nNo Wildcards: Default Implementation:\n");
     run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
-    printf("No Wildcards: Hashmap Implementation:\n");
+    printf("\nNo Wildcards: Hashmap Implementation:\n");
     run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
 
 
@@ -193,9 +196,9 @@ int main(int argc, char **argv)
     // with wildcards
     operations = prepare_envelopes(num_ops, num_tags, num_ranks, false);
 
-    printf("With Wildcards: Default Implementation:\n");
+    printf("\nWith Wildcards: Default Implementation:\n");
     run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
-    printf("With Wildcards: Hashmap Implementation:\n");
+    printf("\nWith Wildcards: Hashmap Implementation:\n");
     run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
 
     free(operations);
