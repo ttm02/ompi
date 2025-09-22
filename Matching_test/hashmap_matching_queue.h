@@ -12,19 +12,19 @@ bool mca_pml_ob1_matching_protection = true;
 
 #include "../ompi/mca/pml/ob1/custommatch/pml_ob1_custom_match_hashmap.h"
 
-typedef hashmap matching_data;
+typedef hashmap matching_data_hashmap;
 
-static inline matching_data *init_matching_queues()
+static inline matching_data_hashmap *hashmap_init_matching_queues()
 {
     return match_map_init();
 }
 
-static inline void destroy_matching_queues(matching_data *matching_queues)
+static inline void hashmap_destroy_matching_queues(matching_data_hashmap *matching_queues)
 {
     match_map_destroy(matching_queues);
 }
 
-static inline bool try_match_incoming(matching_data *matching_queue, int tag, int src, void *payload)
+static inline bool hashmap_try_match_incoming(matching_data_hashmap *matching_queue, int tag, int src, void *payload)
 {
     bool retval = true;
     void **to_fill = NULL;
@@ -40,7 +40,7 @@ static inline bool try_match_incoming(matching_data *matching_queue, int tag, in
     return retval;
 }
 
-static inline bool try_match_receive(matching_data *matching_queue, int tag, int src, void *payload)
+static inline bool hashmap_try_match_receive(matching_data_hashmap *matching_queue, int tag, int src, void *payload)
 {
     bool retval = true;
     void **to_fill = NULL;

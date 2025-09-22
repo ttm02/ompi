@@ -16,16 +16,9 @@
 #include <time.h>
 
 
-//#define USE_HASHMAP
-#define USE_WILDCARD_RANK
-#define USE_WILDCARD_TAG
+#include "original_matching_queue.h"
+#include "hashmap_matching_queue.h"
 
-
-#ifndef USE_HASHMAP
-#    include "original_matching_queue.h"
-#else
-#    include "hashmap_matching_queue.h"
-#endif
 
 // from https://stackoverflow.com/questions/6127503/shuffle-array-in-c
 /* Arrange the N elements of ARRAY in random order.
@@ -67,54 +60,43 @@ int *get_value_pool(int num_vals, int pool_range)
     return values;
 }
 
-int main(int argc, char **argv)
+
+int* prepare_envelopes(int num_ops, int num_tags,int num_ranks,bool use_wildcards)
 {
-    int opt;
-    long num_ops = 100000;
-    int tag_pool_range = 1000;
-    int rank_pool_range = 100;
-    int num_tags = 100;
-    int num_ranks = 20;
-    while ((opt = getopt(argc, argv, "n:t:r:")) != -1) {
-        switch (opt) {
-        case 'n':
-            num_ops = atol(optarg);
-            break;
-        case 't':
-            num_tags = atoi(optarg);
-            break;
-        case 'r':
-            num_ranks = atoi(optarg);
-            break;
+    int *tags = get_value_pool(num_tags, num_tags);
+    int *ranks = get_value_pool(num_ranks, num_ranks);
+    if (use_wildcards) {
+        tags[0]=OMPI_ANY_TAG;
+        ranks[0]=OMPI_ANY_SOURCE;
+    }
+
+    int* values = malloc(num_ops * 3 *sizeof(int));
+
+    for (int i = 0; i < num_ops; ++i) {
+        int mode = rand() % 2;
+        int src = ranks[rand() % num_ranks];
+        int tag = tags[rand() % num_tags];
+        if (tag==OMPI_ANY_TAG || src==OMPI_ANY_SOURCE) {
+            mode=0; //a wildcard operations must be a recv
         }
-    }
-    // random seed
-    int num_t = 1;
-#pragma omp parallel
-    {
-#pragma omp master
-        {
-            num_t = omp_get_num_threads();
-        }
-    }
 
-    // random seed
-    srand((unsigned) time(NULL));
-    unsigned int *srand_buffer = malloc(sizeof(unsigned int) * num_t);
-    for (int i = 0; i < num_t; ++i) {
-        srand_buffer[i] = rand();
+        values[i*3+0] = mode;
+        values[i*3+1] = src;
+        values[i*3+2] = tag;
     }
+    free(tags);
+    free(ranks);
+    return values;
+}
 
-    int *tags = get_value_pool(num_tags, tag_pool_range);
-    int *ranks = get_value_pool(num_ranks, rank_pool_range);
-#ifdef USE_WILDCARD_RANK
-    tags[0]=OMPI_ANY_TAG;
-#endif
-#ifdef USE_WILDCARD_RANK
-    ranks[0]=OMPI_ANY_SOURCE;
-#endif
-
-    matching_data *matching_queue = init_matching_queues();
+void run_experiment(const int num_ops, const int * operations,
+    void *(*init_matching_queues)(),
+    void (*destroy_matching_queues)(void*),
+    bool (*try_match_incoming) (void*, int, int, void*),
+    bool (*try_match_receive) (void*, int, int, void*)
+    )
+{
+        void *matching_queue = init_matching_queues();
 
     long prq_appends = 0, prq_dequeues = 0;
     long umq_appends = 0, umq_dequeues = 0;
@@ -127,12 +109,12 @@ int main(int argc, char **argv)
     reduction(+ : prq_appends, prq_dequeues, umq_appends, umq_dequeues) \
     firstprivate(pq_size, uq_size) reduction(max : pq_max, uq_max)
     for (long i = 0; i < num_ops; ++i) {
-        int tag = tags[rand_r(&srand_buffer[omp_get_thread_num()]) % num_tags];
-        int src = ranks[rand_r(&srand_buffer[omp_get_thread_num()]) % num_ranks];
+        int mode = operations[i*3+0];
+        int src = operations[i*3+1];
+        int tag = operations[i*3+2];
 
         void *payload = (void *) (uintptr_t) i + 1; // not null palyoad
-        if (rand_r(&srand_buffer[omp_get_thread_num()]) % 2 == 1 && tag!=OMPI_ANY_TAG && src!=OMPI_ANY_SOURCE) {
-            // any tag operations: must be recv
+        if (mode) {
             // Operation 1: message arrival
             // search posted receives (PRQ)
             if (try_match_incoming(matching_queue, tag, src, payload)) {
@@ -165,15 +147,58 @@ int main(int argc, char **argv)
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
     double total_ms = diff_nsec(&t0, &t1) / 1e6;
-    printf("Number of Operations: %ld  in %.3f ms\n", num_ops, total_ms);
+    double ops_per_sec = num_ops / (total_ms / 1000.0);
+    printf("Number of Operations: %ld in %.3f ms (%ld ops/sec)\n", num_ops, total_ms,ops_per_sec);
     printf("PRQ appends: %ld, PRQ dequeues: %ld, PRQ max size: %d\n", prq_appends, prq_dequeues,
            pq_max);
     printf("UMQ appends: %ld, UMQ dequeues: %ld, UMQ max size: %d\n", umq_appends, umq_dequeues,
            uq_max);
 
-    free(tags);
-    free(ranks);
-
     destroy_matching_queues(matching_queue);
+
+}
+
+int main(int argc, char **argv)
+{
+    int opt;
+    long num_ops = 100000;
+    int num_tags = 100;
+    int num_ranks = 20;
+    while ((opt = getopt(argc, argv, "n:t:r:")) != -1) {
+        switch (opt) {
+        case 'n':
+            num_ops = atol(optarg);
+            break;
+        case 't':
+            num_tags = atoi(optarg);
+            break;
+        case 'r':
+            num_ranks = atoi(optarg);
+            break;
+        }
+    }
+    // random seed
+    srand((unsigned) time(NULL));
+
+    int* operations = prepare_envelopes(num_ops, num_tags, num_ranks, false);
+
+    printf("No Wildcards: Default Implementation:\n");
+    run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
+    printf("No Wildcards: Hashmap Implementation:\n");
+    run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
+
+
+
+    free(operations);
+    // with wildcards
+    operations = prepare_envelopes(num_ops, num_tags, num_ranks, false);
+
+    printf("With Wildcards: Default Implementation:\n");
+    run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
+    printf("With Wildcards: Hashmap Implementation:\n");
+    run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
+
+    free(operations);
+
     return 0;
 }

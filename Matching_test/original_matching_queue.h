@@ -21,24 +21,24 @@ bool mca_pml_ob1_matching_protection = true;
 typedef struct matching_data {
     custom_match_prq *pq;
     custom_match_umq *uq;
-} matching_data;
+} matching_data_default;
 
-static inline matching_data *init_matching_queues()
+static inline matching_data_default *default_init_matching_queues()
 {
-    matching_data *matching_queues = malloc(sizeof(matching_data));
+    matching_data_default *matching_queues = malloc(sizeof(matching_data_default));
     matching_queues->pq = custom_match_prq_init();
     matching_queues->uq = custom_match_umq_init();
     return matching_queues;
 }
 
-static inline void destroy_matching_queues(matching_data *matching_queues)
+static inline void default_destroy_matching_queues(matching_data_default *matching_queues)
 {
     custom_match_prq_destroy(matching_queues->pq);
     custom_match_umq_destroy(matching_queues->uq);
     free(matching_queues);
 }
 
-static inline bool try_match_incoming(matching_data *matching_queue, int tag, int src, void *payload)
+static inline bool default_try_match_incoming(matching_data_default *matching_queue, int tag, int src, void *payload)
 {
     bool retval = true;
 #pragma omp critical
@@ -55,7 +55,7 @@ static inline bool try_match_incoming(matching_data *matching_queue, int tag, in
     return retval;
 }
 
-static inline bool try_match_receive(matching_data *matching_queue, int tag, int src, void *payload)
+static inline bool default_try_match_receive(matching_data_default *matching_queue, int tag, int src, void *payload)
 {
     bool retval = true;
 #pragma omp critical
