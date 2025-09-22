@@ -68,6 +68,7 @@ int *get_value_pool(int num_vals, int pool_range)
 
 int* prepare_envelopes(int num_ops, int num_tags,int num_ranks,bool use_wildcards)
 {
+    printf("Generate Operation Sequence\n");
     int *tags = get_value_pool(num_tags, num_tags);
     int *ranks = get_value_pool(num_ranks, num_ranks);
     if (use_wildcards) {
