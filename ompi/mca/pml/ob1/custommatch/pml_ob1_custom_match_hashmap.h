@@ -38,7 +38,7 @@
 
 #define COUNT_COLLISIONS
 
-#define WILDCARD_SUPPORT
+//#define WILDCARD_SUPPORT
 
 typedef struct bucket_node {
     int tag;

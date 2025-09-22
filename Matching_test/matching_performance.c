@@ -1,10 +1,11 @@
-// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c original_matching_queue.c hashmap_matching_queue.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread -fopenmp
+// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c original_matching_queue.c hashmap_matching_queue_with_wildcard.c hashmap_matching_queue_no_wildcard.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread -fopenmp
 /*
  * PRQ/UMQ Performance Test
  * Simulates message-arrival and receive-posted operations
  * Usage: ./bench -n <num_ops> -t <tag_range> -r <rank_range>
  */
 #include "../ompi/mca/pml/pml_constants.h"
+#include "hashmap_matching_queue_no_wildcard.h"
 
 #include <assert.h>
 #include <getopt.h>
@@ -17,7 +18,8 @@
 
 
 #include "original_matching_queue.h"
-#include "hashmap_matching_queue.h"
+#include "hashmap_matching_queue_with_wildcard.h"
+#include "hashmap_matching_queue_no_wildcard.h"
 
 // switch on mpi internal locking
 bool mca_pml_ob1_matching_protection = true;
@@ -72,6 +74,7 @@ int* prepare_envelopes(int num_ops, int num_tags,int num_ranks,bool use_wildcard
         tags[0]=OMPI_ANY_TAG;
         ranks[0]=OMPI_ANY_SOURCE;
     }
+    int num_wildcards=0;
 
     int* values = malloc(num_ops * 3 *sizeof(int));
 
@@ -81,6 +84,7 @@ int* prepare_envelopes(int num_ops, int num_tags,int num_ranks,bool use_wildcard
         int tag = tags[rand() % num_tags];
         if (tag==OMPI_ANY_TAG || src==OMPI_ANY_SOURCE) {
             mode=0; //a wildcard operations must be a recv
+            num_wildcards++;
         }
 
         values[i*3+0] = mode;
@@ -89,6 +93,9 @@ int* prepare_envelopes(int num_ops, int num_tags,int num_ranks,bool use_wildcard
     }
     free(tags);
     free(ranks);
+    if (use_wildcards) {
+        printf("Percentage of Operations with Wildcards: %.3f %%\n" ,num_wildcards/(double)num_ops *100.0);
+    }
     return values;
 }
 
@@ -151,7 +158,7 @@ void run_experiment(const int num_ops, const int * operations,
 
     double total_ms = diff_nsec(&t0, &t1) / 1e6;
     double ops_per_sec = (double)num_ops / (total_ms / 1000.0);
-    printf("Number of Operations: %d in %.3f ms (%f ops/sec)\n", num_ops, total_ms,ops_per_sec);
+    printf("Number of Operations: %d in %.3f ms (%.2f ops/sec)\n", num_ops, total_ms,ops_per_sec);
     printf("PRQ appends: %ld, PRQ dequeues: %ld, PRQ max size: %d\n", prq_appends, prq_dequeues,
            pq_max);
     printf("UMQ appends: %ld, UMQ dequeues: %ld, UMQ max size: %d\n", umq_appends, umq_dequeues,
@@ -180,21 +187,30 @@ int main(int argc, char **argv)
             break;
         }
     }
-    // random seed
+    // init random seed
     srand((unsigned) time(NULL));
+
+    int num_threads=1;
+#pragma omp parallel
+#pragma omp single
+    num_threads=omp_get_num_threads();
+
+    printf("Run with %d Threads\n",num_threads);
 
     int* operations = prepare_envelopes(num_ops, num_tags, num_ranks, false);
 
     printf("\nNo Wildcards: Default Implementation:\n");
     run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
-    printf("\nNo Wildcards: Hashmap Implementation:\n");
+    printf("\nNo Wildcards: Hashmap Implementation (build with NO wildcard support):\n");
+    run_experiment(num_ops,operations,&hashmap_no_wild_init_matching_queues,&hashmap_no_wild_destroy_matching_queues,&hashmap_no_wild_try_match_incoming,&hashmap_no_wild_try_match_receive);
+    printf("\nNo Wildcards: Hashmap Implementation (build with wildcard support):\n");
     run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
-
 
 
     free(operations);
     // with wildcards
-    operations = prepare_envelopes(num_ops, num_tags, num_ranks, false);
+    printf("\n");
+    operations = prepare_envelopes(num_ops, num_tags, num_ranks, true);
 
     printf("\nWith Wildcards: Default Implementation:\n");
     run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);

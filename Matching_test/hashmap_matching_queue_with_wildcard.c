@@ -1,9 +1,10 @@
 
 #include <stdbool.h>
 #include <stdlib.h>
-#include "hashmap_matching_queue.h"
+#include "hashmap_matching_queue_with_wildcard.h"
 
 #define NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
+#define WILDCARD_SUPPORT
 
 #include "../ompi/mca/pml/ob1/custommatch/pml_ob1_custom_match_hashmap.h"
 
