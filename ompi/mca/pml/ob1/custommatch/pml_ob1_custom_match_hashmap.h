@@ -26,6 +26,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+//TODO: reduce the amount of duplicate code when traversing the buckets!!
 
 #ifdef NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
 #    undef CUSTOM_MATCH_DEBUG_VERBOSE
@@ -38,7 +39,15 @@
 
 #define COUNT_COLLISIONS
 
-//#define WILDCARD_SUPPORT
+#define WILDCARD_SUPPORT
+#define WILDCARD_NO_OVERTAKE_SUPPORT
+
+
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+#ifndef WILDCARD_SUPPORT
+_Static_assert(0 && "Erroneous Configuration\n");
+#endif
+#endif
 
 typedef struct bucket_node {
     int tag;
@@ -46,6 +55,9 @@ typedef struct bucket_node {
     struct bucket_node *next;
     bool is_recv;
     void *value;
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+    int seq_num;
+#endif
 } bucket_node;
 
 struct bucket {
@@ -70,11 +82,16 @@ typedef struct hashmap {
     pthread_rwlock_t rwlock;
     bucket_node *wildcard_bucket_head;
     bucket_node *wildcard_bucket_tail;
+    opal_mutex_t wildcard_mutex; // guarding the wildcard bucket
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+    int seq_num;
+#endif
 #endif
 
     bucket_collection buckets[NUM_BUCKETS];
     bucket_node *memory_pool;
     opal_mutex_t mutex;// guarding the memory pool
+
 #ifdef COUNT_COLLISIONS
     int num_collisions;
 #endif
@@ -234,13 +251,20 @@ static inline void *remove_from_list(struct bucket *my_bucket)
 }
 
 #ifdef WILDCARD_SUPPORT
-static inline void *try_match_from_wildcard_umq(hashmap *map, int tag, int peer)
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
 {
-    // TODO evaluate performance when this has its own lock, this currently shares the lock with the memory pool
     // wildcard bucket: need  lock
-    OB1_MATCHING_LOCK(&map->mutex);
+    OB1_MATCHING_LOCK(&map->wildcard_mutex);
+// need to check if msg in normal bucket is older
+    bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
+    OB1_MATCHING_LOCK(&my_bucket->mutex);
+
+    // other threads may change this, but as we locked all relevant buckets, that's not a problem
+    int current_seq = __atomic_load_n(&map->seq_num,__ATOMIC_RELAXED);
 
     // traverse wildcard bucket
+    bucket_node* in_wildcard=NULL;
 
         // the wildcard bucket can only hold posted recvs as unexpected msg cannot have a wildcard
         bucket_node* elem = map->wildcard_bucket_head;
@@ -248,33 +272,244 @@ static inline void *try_match_from_wildcard_umq(hashmap *map, int tag, int peer)
         while (elem!=NULL) {
             if ((elem->tag == OMPI_ANY_TAG || elem->tag == tag)
                 &&(elem->peer == OMPI_ANY_SOURCE || elem->peer == peer)) {
-                // match: remove from list
-                if (prev==NULL) {
-                    map->wildcard_bucket_head=elem->next;
-                }else {
-                    prev->next=elem->next;
-                }
-                // update tail
-                if (elem->next == NULL) {
-                    map->wildcard_bucket_tail=prev;
-                }
-                OB1_MATCHING_UNLOCK(&map->mutex);
-                return elem;
+                // match
+                in_wildcard = elem;
+                break;
                 }
             prev = elem;
             elem = elem->next;
         }
+    // in normal bucket
+    for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
+        if (OPAL_UNLIKELY(my_bucket->buckets[i].tag == -1)) {
+            // initialize on first use
+            my_bucket->buckets[i].tag = tag;
+            my_bucket->buckets[i].peer = peer;
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+            printf("initialize bucket %d_%d: (%d,%d)\n",matching_hash_func(tag, peer),i,tag,peer);
+#endif
+        }
+        if (OPAL_LIKELY(my_bucket->buckets[i].tag == tag && my_bucket->buckets[i].peer == peer)) {
+            // found correct bucket
 
-    OB1_MATCHING_UNLOCK(&map->mutex);
+            // if list empty or same mode: insert to queue
+            if (my_bucket->buckets[i].is_recv == false
+                || my_bucket->buckets[i].bucket_head == NULL) {
+                //TODO
+                assert(false);
+                //match to wildcard or insert if none
+                }else {
+                    // match to older one
+                    assert(false);
+                }
+        }
+    }
+    // overflow
+
+    //TODO
+
+
+
+
+
+    assert(false);
+    OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+    OB1_MATCHING_LOCK(&my_bucket->mutex);
     return NULL; // no match in wildcard bucket - continue normal matching process
 }
+#else
+static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
+{
+    // wildcard bucket: need  lock
+    OB1_MATCHING_LOCK(&map->wildcard_mutex);
 
+    // traverse wildcard bucket
+
+    // the wildcard bucket can only hold posted recvs as unexpected msg cannot have a wildcard
+    bucket_node* elem = map->wildcard_bucket_head;
+    bucket_node* prev = NULL;
+    while (elem!=NULL) {
+        if ((elem->tag == OMPI_ANY_TAG || elem->tag == tag)
+            &&(elem->peer == OMPI_ANY_SOURCE || elem->peer == peer)) {
+            // match: remove from list
+            if (prev==NULL) {
+                map->wildcard_bucket_head=elem->next;
+            }else {
+                prev->next=elem->next;
+            }
+            // update tail
+            if (elem->next == NULL) {
+                map->wildcard_bucket_tail=prev;
+            }
+            OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+            return elem;
+            }
+        prev = elem;
+        elem = elem->next;
+    }
+
+    OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+    return NULL; // no match in wildcard bucket - continue normal matching process
+}
+#endif
+#endif
+
+// integer wrap around logical clock where current is now
+// meaning current+1 is oldest possible while current -1 is newest possible
+static inline bool is_older(int a,int b,int current)
+{
+    if (a < current && b > current) {
+        return false;
+    }
+    if (a > current && b < current) {
+        return true;
+    }
+    assert((a<current && b<current) || (a>current && b>current));
+    // end wrap around handling
+    return a < b;
+}
+
+#ifdef WILDCARD_SUPPORT
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
 
 static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void*** to_fill)
 {
     pthread_rwlock_wrlock(&map->rwlock);
+
+    bucket_node* current_oldest=NULL;
+    bucket_collection* oldest_bucket=NULL;
+    int current_seq_num = map->seq_num; // no need for atomic access, as we have the full lock
+
     // traverse all buckets to find matching
 
+    for (int i = 0; i < NUM_BUCKETS; ++i) {
+        bucket_collection *my_bucket = &map->buckets[i];
+        for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
+            if (!my_bucket->buckets[j].is_recv) {
+                // if bucket holds UMQ
+                bucket_node* prev_elem=NULL;
+                bucket_node* elem = my_bucket->buckets[j].bucket_head;
+                while (elem!=NULL) {
+                    if ((peer==OMPI_ANY_SOURCE || elem->peer == peer) &&(tag==OMPI_ANY_TAG || elem->tag == tag)) {
+                        // found elem
+                        if (!current_oldest) {
+                            current_oldest = elem;
+                            oldest_bucket = my_bucket;
+                        }
+                        if (is_older(elem->seq_num,current_oldest->seq_num,current_seq_num)){
+                            current_oldest = elem;
+                            oldest_bucket = my_bucket;
+                        }
+                    }
+                    prev_elem = elem;
+                    elem = prev_elem->next;
+                }
+            }
+        }
+        //overflow bucket
+        bucket_node* prev_elem=NULL;
+        bucket_node* elem = my_bucket->other_keys_bucket_head;
+        while (elem!=NULL) {
+            if (!elem->is_recv && (peer==OMPI_ANY_SOURCE || elem->peer == peer) &&(tag==OMPI_ANY_TAG || elem->tag == tag)) {
+                // found elem
+                if (!current_oldest) {
+                    current_oldest = elem;
+                    oldest_bucket = my_bucket;
+                }
+                if (is_older(elem->seq_num,current_oldest->seq_num,current_seq_num)){
+                    current_oldest = elem;
+                    oldest_bucket = my_bucket;
+                }
+            }
+            prev_elem = elem;
+            elem = prev_elem->next;
+        }
+    }
+
+            if (current_oldest) {
+                // pthread does not allow to downgrade to readlock when having the writelock
+                // this could be useful here, as we only need the bucket lock and rdlock for the following
+                for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
+                    if (!oldest_bucket->buckets[j].is_recv) {
+                        // if bucket holds UMQ
+                        bucket_node* prev_elem=NULL;
+                        bucket_node* elem = oldest_bucket->buckets[j].bucket_head;
+                        while (elem!=NULL) {
+                            if (current_oldest==elem) {
+                                // found elem
+                                if (prev_elem==NULL) {
+                                    oldest_bucket->buckets[j].bucket_head = elem->next;
+                                }else {
+                                    prev_elem->next=elem->next;
+                                }
+                                if (elem->next == NULL) {
+                                    // removal of last element
+                                    oldest_bucket->buckets[j].bucket_tail = NULL;
+                                }
+
+                                pthread_rwlock_unlock(&map->rwlock);
+                                return to_memory_pool(map, elem);
+                            }
+                            prev_elem = elem;
+                            elem = prev_elem->next;
+                        }
+                    }
+                }// overflow bucket
+                bucket_node* prev_elem=NULL;
+                bucket_node* elem = oldest_bucket->other_keys_bucket_head;
+                while (elem!=NULL) {
+                    if (elem==current_oldest) {
+                        if (prev_elem==NULL) {
+                            oldest_bucket->other_keys_bucket_head = elem->next;
+                        }else {
+                            prev_elem->next=elem->next;
+                        }
+                        if (elem->next == NULL) {
+                            // removal of last element
+                            oldest_bucket->other_keys_bucket_tail = NULL;
+                        }
+
+                        pthread_rwlock_unlock(&map->rwlock);
+                        return to_memory_pool(map, elem);
+                    }
+                    prev_elem = elem;
+                    elem = prev_elem->next;
+                }
+                assert(0 && "Element lost" );
+            }
+    // else:
+ // no match: append wildcard bucket
+
+    bucket_node *new_elem = get_bucket_node(map);
+    new_elem->tag = tag;
+    new_elem->peer = peer;
+    new_elem->next = NULL;
+    new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
+    new_elem->is_recv = true;// must be a recv op as it has wildcard
+    assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
+    *to_fill = &new_elem->value;
+    if (map->wildcard_bucket_tail) {
+        map->wildcard_bucket_tail->next = new_elem;
+
+    }else {
+        map->wildcard_bucket_head = new_elem;
+    }
+    map->wildcard_bucket_tail = new_elem;
+
+    pthread_rwlock_unlock(&map->rwlock);
+    return NULL;
+
+}
+
+#else
+    static inline void *match_with_wildcard_allow_overtake(hashmap *map, int tag, int peer, void*** to_fill)
+{
+    pthread_rwlock_wrlock(&map->rwlock);
+
+    bucket_node* current_oldest=NULL;
+    bucket_collection* oldest_bucket=NULL;
+
+    // traverse all buckets to find matching
     for (int i = 0; i < NUM_BUCKETS; ++i) {
         bucket_collection *my_bucket = &map->buckets[i];
         for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
@@ -302,6 +537,24 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
                 }
             }
         }
+        //overflow bucket
+        bucket_node* prev_elem=NULL;
+        bucket_node* elem = my_bucket->other_keys_bucket_head;
+        while (elem!=NULL) {
+            if (!elem->is_recv && (peer==OMPI_ANY_SOURCE || elem->peer == peer) &&(tag==OMPI_ANY_TAG || elem->tag == tag)) {
+                // found elem
+                if (prev_elem==NULL) {
+                    my_bucket->other_keys_bucket_head= elem->next;
+                }else {
+                    prev_elem->next=elem->next;
+                }
+                if (elem->next == NULL) {
+                    // removal of last element
+                    my_bucket->other_keys_bucket_tail = NULL;
+                }
+                pthread_rwlock_unlock(&map->rwlock);
+                return to_memory_pool(map, elem);
+            }
     }
 
  // no match: append wildcard bucket
@@ -310,7 +563,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
     new_elem->tag = tag;
     new_elem->peer = peer;
     new_elem->next = NULL;
-    new_elem->is_recv = false;// must be an unexpectes msg as it has wildc
+    new_elem->is_recv = true;// must be a recv op as it has wildcard
     assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
     *to_fill = &new_elem->value;
     if (map->wildcard_bucket_tail) {
@@ -325,6 +578,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
     return NULL;
 
 }
+#endif
 #endif
 
 // returns the match (and removed matched from queue)
@@ -343,7 +597,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 
     pthread_rwlock_rdlock(&map->rwlock);
     if ( !is_recv && __atomic_load_n(&map->wildcard_bucket_head,__ATOMIC_RELAXED)!=NULL) {
-        bucket_node *elem_to_dequeue  = try_match_from_wildcard_umq(map,tag,peer);
+        bucket_node *elem_to_dequeue  = try_match_from_wildcard_prq(map,tag,peer);
         if (elem_to_dequeue) {
             pthread_rwlock_unlock(&map->rwlock);
             return to_memory_pool(map, elem_to_dequeue);
@@ -378,6 +632,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 new_elem->tag = tag;
                 new_elem->peer = peer;
                 new_elem->next = NULL;
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+      new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
+#endif
                 new_elem->is_recv = is_recv;
                 assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
                 *to_fill = &new_elem->value;
@@ -426,6 +683,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 new_elem->tag = tag;
                 new_elem->peer = peer;
                 new_elem->next = NULL;
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+                new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
+#endif
                 new_elem->is_recv = is_recv;
                 assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
                 *to_fill = &new_elem->value;
@@ -472,6 +732,9 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     new_elem->tag = tag;
     new_elem->peer = peer;
     new_elem->next = NULL;
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+    new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
+#endif
     new_elem->is_recv = is_recv;
     assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
     *to_fill = &new_elem->value;
@@ -501,6 +764,10 @@ static inline hashmap *match_map_init(void)
     // initialize the locks
 #ifdef WILDCARD_SUPPORT
     pthread_rwlock_init(&map->rwlock, NULL);
+        OBJ_CONSTRUCT(&map->wildcard_mutex, opal_mutex_t);
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+    map->seq_num=0;
+#endif
 #endif
 
     OBJ_CONSTRUCT(&map->mutex, opal_mutex_t);
@@ -521,6 +788,7 @@ static inline void match_map_destroy(hashmap *map)
 
 #ifdef WILDCARD_SUPPORT
     pthread_rwlock_destroy(&map->rwlock);
+        OBJ_DESTRUCT(&map->wildcard_mutex);
 #endif
     OBJ_DESTRUCT(&map->mutex);
     for (int i = 0; i < NUM_BUCKETS; ++i) {
