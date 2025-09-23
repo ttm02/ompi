@@ -39,8 +39,8 @@
 
 #define COUNT_COLLISIONS
 
-#define WILDCARD_SUPPORT
-#define WILDCARD_NO_OVERTAKE_SUPPORT
+//#define WILDCARD_SUPPORT
+//#define WILDCARD_NO_OVERTAKE_SUPPORT
 
 
 #ifdef WILDCARD_NO_OVERTAKE_SUPPORT
@@ -252,7 +252,22 @@ static inline void *remove_from_list(struct bucket *my_bucket)
 
 #ifdef WILDCARD_SUPPORT
 #ifdef WILDCARD_NO_OVERTAKE_SUPPORT
-static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
+// integer wrap around logical clock where current is now
+// meaning current+1 is oldest possible while current is the newest possible
+static inline bool is_older(int a, int b, int current)
+{
+    if (a <= current && b > current) {
+        return false;
+    }
+    if (a > current && b <= current) {
+        return true;
+    }
+    assert((a<=current && b<=current) || (a>current && b>current));
+    // end wrap around handling
+    return a < b;
+}
+
+static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer, void*** to_fill)
 {
     // wildcard bucket: need  lock
     OB1_MATCHING_LOCK(&map->wildcard_mutex);
@@ -268,7 +283,6 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
 
         // the wildcard bucket can only hold posted recvs as unexpected msg cannot have a wildcard
         bucket_node* elem = map->wildcard_bucket_head;
-        bucket_node* prev = NULL;
         while (elem!=NULL) {
             if ((elem->tag == OMPI_ANY_TAG || elem->tag == tag)
                 &&(elem->peer == OMPI_ANY_SOURCE || elem->peer == peer)) {
@@ -276,9 +290,9 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
                 in_wildcard = elem;
                 break;
                 }
-            prev = elem;
             elem = elem->next;
         }
+
     // in normal bucket
     for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
         if (OPAL_UNLIKELY(my_bucket->buckets[i].tag == -1)) {
@@ -291,31 +305,154 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
         }
         if (OPAL_LIKELY(my_bucket->buckets[i].tag == tag && my_bucket->buckets[i].peer == peer)) {
             // found correct bucket
-
             // if list empty or same mode: insert to queue
             if (my_bucket->buckets[i].is_recv == false
                 || my_bucket->buckets[i].bucket_head == NULL) {
-                //TODO
-                assert(false);
-                //match to wildcard or insert if none
+
+                if (in_wildcard) {
+                    // match to wildcard
+                    goto match_to_wildcard;
+                }else {
+                    // no match: insert to UMQ
+                    bucket_node *new_elem = get_bucket_node(map);
+                    new_elem->tag = tag;
+                    new_elem->peer = peer;
+                    new_elem->next = NULL;
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+                    new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
+#endif
+                    new_elem->is_recv = false;
+                    assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
+                    *to_fill = &new_elem->value;
+                    insert_to_list(&my_bucket->buckets[i], new_elem, false);
+                    OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+                    OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+                    return NULL;
+                }
                 }else {
                     // match to older one
-                    assert(false);
+                    if (in_wildcard && is_older(in_wildcard->seq_num,elem->seq_num,current_seq)) {
+                        goto match_to_wildcard;
+                    }else {
+                        bucket_node *to_remove= remove_from_list(&my_bucket->buckets[i]);
+                        OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+                        OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+                        return to_remove;
+                    }
                 }
         }
     }
-    // overflow
+    // overflow bucket
+        bucket_node *prev_elem = NULL;
+    elem = my_bucket->other_keys_bucket_head;
 
-    //TODO
+    while (elem != NULL) {
+        if (elem->tag == tag && elem->peer == peer) {
+            // found matching entry
+            if (elem->is_recv == false) {
+                // is in opposite queue
+                if (in_wildcard) {
+                    goto match_to_wildcard;
+                }
+                // same queue: insert at end
+                bucket_node *new_elem = get_bucket_node(map);
+                new_elem->tag = tag;
+                new_elem->peer = peer;
+                new_elem->next = NULL;
+                new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
+                new_elem->is_recv = false;
+                assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
+                *to_fill = &new_elem->value;
+                my_bucket->other_keys_bucket_tail->next = new_elem;
+                my_bucket->other_keys_bucket_tail = new_elem;
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+                printf("add (%d,%d) to %s \n",tag,peer, false?"prq":"umq");
+#endif
+                OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+                return NULL;
+            } else {
+                if (in_wildcard && is_older(in_wildcard->seq_num,elem->seq_num,current_seq)) {
+                    goto match_to_wildcard;
+                }
+                // match: dequeue
+                if (prev_elem != NULL) {
+                    prev_elem->next = elem->next;
+                } else {
+                    // first list elem
+                    my_bucket->other_keys_bucket_head = elem->next;
+                }
+                // last elem
+                if (my_bucket->other_keys_bucket_tail == elem) {
+                    my_bucket->other_keys_bucket_tail = prev_elem;
+                    // also works when list is emptied
+                }
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+                printf("matched (%d,%d) from %s \n",tag,peer, !false?"prq":"umq");
+#endif
+                OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+                return elem;
+            }
+        }
+        prev_elem = elem;
+        elem = prev_elem->next;
+    }
+    // none found
+    if (in_wildcard) {
+        goto match_to_wildcard;
+    }
+    //  no match: insert to overflow
+    bucket_node *new_elem = get_bucket_node(map);
+    new_elem->tag = tag;
+    new_elem->peer = peer;
+    new_elem->next = NULL;
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+    new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
+#endif
+    new_elem->is_recv = false;
+    assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
+    *to_fill = &new_elem->value;
 
-
-
-
-
-    assert(false);
+    if (my_bucket->other_keys_bucket_tail == NULL) {
+        assert(my_bucket->other_keys_bucket_head == NULL);
+        my_bucket->other_keys_bucket_head = new_elem;
+        my_bucket->other_keys_bucket_tail = new_elem;
+    } else {
+        my_bucket->other_keys_bucket_tail->next = new_elem;
+        my_bucket->other_keys_bucket_tail = new_elem;
+    }
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+    printf("add (%d,%d) to %s \n",tag,peer, false?"prq":"umq");
+#endif
     OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
-    OB1_MATCHING_LOCK(&my_bucket->mutex);
-    return NULL; // no match in wildcard bucket - continue normal matching process
+    OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+    return NULL;
+
+
+    match_to_wildcard:
+    elem = map->wildcard_bucket_head;
+    prev_elem = NULL;
+    while (elem != NULL) {
+        if (elem== in_wildcard) {
+            if (prev_elem) {
+                prev_elem->next = elem->next;
+            }else {
+                map->wildcard_bucket_head = elem->next;
+            }
+            if (elem->next==NULL) {
+                // removed last elem
+                map->wildcard_bucket_tail= prev_elem;
+            }
+            OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+            OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+            return elem;
+        }
+        prev_elem = elem;
+        elem = elem->next;
+    }
+
+    assert(false);// unreachable
 }
 #else
 static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
@@ -353,21 +490,6 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
 }
 #endif
 #endif
-
-// integer wrap around logical clock where current is now
-// meaning current+1 is oldest possible while current -1 is newest possible
-static inline bool is_older(int a,int b,int current)
-{
-    if (a < current && b > current) {
-        return false;
-    }
-    if (a > current && b < current) {
-        return true;
-    }
-    assert((a<current && b<current) || (a>current && b>current));
-    // end wrap around handling
-    return a < b;
-}
 
 #ifdef WILDCARD_SUPPORT
 #ifdef WILDCARD_NO_OVERTAKE_SUPPORT
@@ -466,7 +588,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
                         }
                         if (elem->next == NULL) {
                             // removal of last element
-                            oldest_bucket->other_keys_bucket_tail = NULL;
+                            oldest_bucket->other_keys_bucket_tail = prev_elem;
                         }
 
                         pthread_rwlock_unlock(&map->rwlock);
@@ -475,7 +597,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
                     prev_elem = elem;
                     elem = prev_elem->next;
                 }
-                assert(0 && "Element lost" );
+                assert(0 && "Element lost" ); // unreachable
             }
     // else:
  // no match: append wildcard bucket
@@ -550,7 +672,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
                 }
                 if (elem->next == NULL) {
                     // removal of last element
-                    my_bucket->other_keys_bucket_tail = NULL;
+                    oldest_bucket->other_keys_bucket_tail = prev_elem;
                 }
                 pthread_rwlock_unlock(&map->rwlock);
                 return to_memory_pool(map, elem);
@@ -597,10 +719,13 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 
     pthread_rwlock_rdlock(&map->rwlock);
     if ( !is_recv && __atomic_load_n(&map->wildcard_bucket_head,__ATOMIC_RELAXED)!=NULL) {
-        bucket_node *elem_to_dequeue  = try_match_from_wildcard_prq(map,tag,peer);
+        bucket_node *elem_to_dequeue  = try_match_from_wildcard_prq(map,tag,peer,to_fill);
         if (elem_to_dequeue) {
             pthread_rwlock_unlock(&map->rwlock);
             return to_memory_pool(map, elem_to_dequeue);
+        }else {
+            pthread_rwlock_unlock(&map->rwlock);
+            return NULL;
         }
     }
 
@@ -689,6 +814,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 new_elem->is_recv = is_recv;
                 assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
                 *to_fill = &new_elem->value;
+                assert(my_bucket->other_keys_bucket_tail);// since elem is in list, it contains at least one entry
                 my_bucket->other_keys_bucket_tail->next = new_elem;
                 my_bucket->other_keys_bucket_tail = new_elem;
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);

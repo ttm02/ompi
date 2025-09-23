@@ -5,6 +5,7 @@
 
 #define NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
 #define WILDCARD_SUPPORT
+#define WILDCARD_NO_OVERTAKE_SUPPORT
 
 #include "../ompi/mca/pml/ob1/custommatch/pml_ob1_custom_match_hashmap.h"
 
