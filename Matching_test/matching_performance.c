@@ -22,6 +22,8 @@
 #include "hashmap_matching_queue_no_wildcard.h"
 #include "hashmap_matching_queue_overtake_wildcard.h"
 
+#include <string.h>
+
 // switch on mpi internal locking
 bool mca_pml_ob1_matching_protection = true;
 
@@ -67,7 +69,7 @@ int *get_value_pool(int num_vals, int pool_range)
 }
 
 
-int* prepare_envelopes(int num_ops, int num_tags,int num_ranks,bool use_wildcards)
+int* prepare_envelopes_random(int num_ops, int num_tags,int num_ranks,bool use_wildcards)
 {
     printf("Generate Operation Sequence\n");
     int *tags = get_value_pool(num_tags, num_tags);
@@ -97,6 +99,72 @@ int* prepare_envelopes(int num_ops, int num_tags,int num_ranks,bool use_wildcard
     free(ranks);
     if (use_wildcards) {
         printf("Percentage of Operations with Wildcards: %.3f %%\n" ,num_wildcards/(double)num_ops *100.0);
+    }
+    return values;
+}
+
+int* prepare_envelopes_num_msg(int num_ops,int msg_per_phase, int num_ranks,bool use_wildcards)
+{
+    int num_phases = num_ops/(msg_per_phase*2);
+    int* ranks=malloc(sizeof(int) * msg_per_phase);
+    int* tags=malloc(sizeof(int) * msg_per_phase);
+    for (int i = 0; i < msg_per_phase; ++i) {
+        ranks[i] = rand() % num_ranks;
+        tags[i] = i;
+    }
+
+
+    // 0 not in this phase
+    // 1 send in phase
+    // 2 recv in phase
+    // 3 matched in phase
+    int* msg_status=calloc(sizeof(int),msg_per_phase);
+
+    int* values = malloc(num_ops * 3 *sizeof(int));
+
+    for (int i = 0; i < num_ops; ++i) {
+        if (i% (msg_per_phase*2)==0)
+        {
+            // end of a phase
+            // 2 times msg_per_phase as recv and send
+            memset(msg_status, 0, sizeof(int)*msg_per_phase);
+            // in MT mode: use a openmp sync after a phase?
+        }
+        bool valid=false;
+        int msg_num=0;
+        // todo more efficient implementation of getting an unused operation
+        while (!valid) {
+            msg_num = rand() % msg_per_phase;
+            if (msg_status[msg_num] <3) {
+                valid=true;
+            }
+        }
+        int is_send =0;
+        if (msg_status[msg_num]==0) {
+            is_send = rand() % 2;
+            if (is_send) {
+                msg_status[msg_num]=1;
+            }else {
+                msg_status[msg_num]=2;
+            }
+        }else if (msg_status[msg_num]==1) {
+            msg_status[msg_num]=3;
+            is_send = 0;
+        }else if (msg_status[msg_num]==2) {
+            msg_status[msg_num]=3;
+            is_send = 1;
+        }else {
+            assert(0);
+        }
+
+        values[i*3+0] = is_send;
+        values[i*3+1] = tags[msg_num];
+        values[i*3+2] = ranks[msg_num];
+        if (use_wildcards && msg_num==0 && msg_status[msg_num]==2) {
+            // one wildcard recv
+            values[i*3+1] = MPI_ANY_TAG;
+            values[i*3+2] = MPI_ANY_SOURCE;
+        }
     }
     return values;
 }
@@ -204,7 +272,7 @@ int main(int argc, char **argv)
     printf("Run with %d Threads\n",num_threads);
 
     for (int i=0;i<repititions;++i) {
-        int* operations = prepare_envelopes(num_ops, num_tags, num_ranks, false);
+        int* operations = prepare_envelopes_num_msg(num_ops, num_tags, num_ranks, false);
 
         printf("\nNo Wildcards: Default Implementation:\n");
         run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
@@ -219,7 +287,7 @@ int main(int argc, char **argv)
         free(operations);
         // with wildcards
         printf("\n");
-        operations = prepare_envelopes(num_ops, num_tags, num_ranks, true);
+        operations = prepare_envelopes_num_msg(num_ops, num_tags, num_ranks, true);
 
         printf("\nWith Wildcards: Default Implementation:\n");
         run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
