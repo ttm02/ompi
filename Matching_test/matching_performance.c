@@ -1,4 +1,4 @@
-// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c original_matching_queue.c hashmap_matching_queue_with_wildcard.c hashmap_matching_queue_no_wildcard.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread -fopenmp
+// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c original_matching_queue.c hashmap_matching_queue_with_wildcard.c hashmap_matching_queue_no_wildcard.c hashmap_matching_queue_overtake_wildcard.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread -fopenmp
 /*
  * PRQ/UMQ Performance Test
  * Simulates message-arrival and receive-posted operations
@@ -20,6 +20,7 @@
 #include "original_matching_queue.h"
 #include "hashmap_matching_queue_with_wildcard.h"
 #include "hashmap_matching_queue_no_wildcard.h"
+#include "hashmap_matching_queue_overtake_wildcard.h"
 
 // switch on mpi internal locking
 bool mca_pml_ob1_matching_protection = true;
@@ -209,7 +210,9 @@ int main(int argc, char **argv)
         run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
         printf("\nNo Wildcards: Hashmap Implementation (build with NO wildcard support):\n");
         run_experiment(num_ops,operations,&hashmap_no_wild_init_matching_queues,&hashmap_no_wild_destroy_matching_queues,&hashmap_no_wild_try_match_incoming,&hashmap_no_wild_try_match_receive);
-        printf("\nNo Wildcards: Hashmap Implementation (build with wildcard support):\n");
+        printf("\nNo Wildcards: Hashmap Implementation (build with overtaking wildcard support):\n");
+        run_experiment(num_ops,operations,&hashmap_overtake_wild_init_matching_queues,&hashmap_overtake_wild_destroy_matching_queues,&hashmap_overtake_wild_try_match_incoming,&hashmap_overtake_wild_try_match_receive);
+        printf("\nNo Wildcards: Hashmap Implementation (build with full wildcard support):\n");
         run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
 
 
@@ -220,7 +223,9 @@ int main(int argc, char **argv)
 
         printf("\nWith Wildcards: Default Implementation:\n");
         run_experiment(num_ops,operations,&default_init_matching_queues,&default_destroy_matching_queues,&default_try_match_incoming,&default_try_match_receive);
-        printf("\nWith Wildcards: Hashmap Implementation:\n");
+        printf("\nWith Wildcards: Hashmap Implementation (overtaking wildcards):\n");
+        run_experiment(num_ops,operations,&hashmap_overtake_wild_init_matching_queues,&hashmap_overtake_wild_destroy_matching_queues,&hashmap_overtake_wild_try_match_incoming,&hashmap_overtake_wild_try_match_receive);
+        printf("\nWith Wildcards: Hashmap Implementation (full wildcard support):\n");
         run_experiment(num_ops,operations,&hashmap_init_matching_queues,&hashmap_destroy_matching_queues,&hashmap_try_match_incoming,&hashmap_try_match_receive);
 
         free(operations);
