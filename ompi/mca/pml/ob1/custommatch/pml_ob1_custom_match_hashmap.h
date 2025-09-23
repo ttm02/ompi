@@ -318,9 +318,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
                     new_elem->tag = tag;
                     new_elem->peer = peer;
                     new_elem->next = NULL;
-#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
                     new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
-#endif
                     new_elem->is_recv = false;
                     assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
                     *to_fill = &new_elem->value;
@@ -455,7 +453,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
     assert(false);// unreachable
 }
 #else
-static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
+static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer, void*** to_fill)
 {
     // wildcard bucket: need  lock
     OB1_MATCHING_LOCK(&map->wildcard_mutex);
@@ -489,9 +487,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer)
     return NULL; // no match in wildcard bucket - continue normal matching process
 }
 #endif
-#endif
 
-#ifdef WILDCARD_SUPPORT
 #ifdef WILDCARD_NO_OVERTAKE_SUPPORT
 
 static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void*** to_fill)
@@ -624,7 +620,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
 }
 
 #else
-    static inline void *match_with_wildcard_allow_overtake(hashmap *map, int tag, int peer, void*** to_fill)
+static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void*** to_fill)
 {
     pthread_rwlock_wrlock(&map->rwlock);
 
@@ -672,11 +668,14 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
                 }
                 if (elem->next == NULL) {
                     // removal of last element
-                    oldest_bucket->other_keys_bucket_tail = prev_elem;
+                    my_bucket->other_keys_bucket_tail = prev_elem;
                 }
                 pthread_rwlock_unlock(&map->rwlock);
                 return to_memory_pool(map, elem);
             }
+            prev_elem= elem;
+            elem = elem->next;
+        }
     }
 
  // no match: append wildcard bucket
@@ -723,10 +722,13 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
         if (elem_to_dequeue) {
             pthread_rwlock_unlock(&map->rwlock);
             return to_memory_pool(map, elem_to_dequeue);
-        }else {
+        }
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+        else {
             pthread_rwlock_unlock(&map->rwlock);
             return NULL;
         }
+#endif
     }
 
 #endif
