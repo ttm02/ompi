@@ -33,7 +33,7 @@
 #    undef CUSTOM_MATCH_DEBUG
 #endif
 
-#define NUM_BUCKETS           10
+#define NUM_BUCKETS           16
 #define NUM_QUEEUS_IN_BUCKETS 2
 // the hash function used is expected to have one collision (peer+tag == tag+peer)
 
