@@ -33,6 +33,10 @@
 #    undef CUSTOM_MATCH_DEBUG
 #endif
 
+// to avoid false sharing of buckets
+#define LEVEL1_DCACHE_LINESIZE 64
+//getconf LEVEL1_DCACHE_LINESIZE
+
 #define NUM_BUCKETS           16
 #define NUM_QUEEUS_IN_BUCKETS 2
 // the hash function used is expected to have one collision (peer+tag == tag+peer)
@@ -717,7 +721,8 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     }
 
     pthread_rwlock_rdlock(&map->rwlock);
-    if ( !is_recv && __atomic_load_n(&map->wildcard_bucket_head,__ATOMIC_RELAXED)!=NULL) {
+    // no need for atomic operation, as write only happens on writelock
+    if ( OPAL_UNLIKELY(!is_recv && map->wildcard_bucket_head!=NULL)) {
         bucket_node *elem_to_dequeue  = try_match_from_wildcard_prq(map,tag,peer,to_fill);
         if (elem_to_dequeue) {
             pthread_rwlock_unlock(&map->rwlock);
