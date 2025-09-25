@@ -181,6 +181,28 @@ operation *get_phase(int msg_per_phase, int num_ranks, bool use_tag_wildcard,
     return phase;
 }
 
+void split_phase(operation *phase, int op_per_phase, bool revc_first)
+{
+    operation *temp = malloc(sizeof(operation) * 2 * op_per_phase);
+    int begin = 0;
+    int end = op_per_phase * 2 - 1;
+
+    for (int i = 0; i < op_per_phase; ++i) {
+        if (revc_first) {
+            temp[begin++] = phase[i * 2 + 0];
+            temp[end--] = phase[i * 2 + 1];
+        } else {
+            temp[end--] = phase[i * 2 + 0];
+            temp[begin++] = phase[i * 2 + 1];
+        }
+    }
+    assert(begin == end + 1);
+
+    memcpy(phase, temp, op_per_phase * 2 * sizeof(operation));
+    free(temp);
+}
+
+// random order of operations per phase
 operation *prepare_envelopes_randomized_phases(int num_phases, int msg_per_phase, int num_ranks,
                                                bool use_wildcards)
 {
@@ -192,8 +214,59 @@ operation *prepare_envelopes_randomized_phases(int num_phases, int msg_per_phase
     operation *values = malloc(num_phases * phase_size * sizeof(operation));
 
     for (int i = 0; i < num_phases; ++i) {
-        // random order of operations per phase
+
         shuffle_op(phase, phase_size);
+        memcpy(&values[i * phase_size], phase, phase_size * sizeof(operation));
+    }
+    free(phase);
+    return values;
+}
+
+// all recv are posted before msg arrival
+operation *prepare_envelopes_rsend_phases(int num_phases, int msg_per_phase, int num_ranks,
+                                          bool use_wildcards)
+{
+    operation *phase = get_phase(msg_per_phase, num_ranks, use_wildcards, use_wildcards);
+    split_phase(phase, msg_per_phase, true);
+    int phase_size = 2 * msg_per_phase;
+    operation *values = malloc(num_phases * phase_size * sizeof(operation));
+
+    for (int i = 0; i < num_phases; ++i) {
+        // randomize each send and recv part?
+        memcpy(&values[i * phase_size], phase, phase_size * sizeof(operation));
+    }
+    free(phase);
+    return values;
+}
+
+// all msg arrive before recv is posted
+operation *prepare_envelopes_unexpected_phases(int num_phases, int msg_per_phase, int num_ranks,
+                                               bool use_wildcards)
+{
+    operation *phase = get_phase(msg_per_phase, num_ranks, use_wildcards, use_wildcards);
+    split_phase(phase, msg_per_phase, false);
+    int phase_size = 2 * msg_per_phase;
+
+    operation *values = malloc(num_phases * phase_size * sizeof(operation));
+
+    for (int i = 0; i < num_phases; ++i) {
+        // randomize each send and recv part?
+        memcpy(&values[i * phase_size], phase, phase_size * sizeof(operation));
+    }
+    free(phase);
+    return values;
+}
+
+// matching operations right after one another, the recv is posted fir
+operation *prepare_envelopes_perfect_phases(int num_phases, int msg_per_phase, int num_ranks,
+                                            bool use_wildcards)
+{
+    operation *phase = get_phase(msg_per_phase, num_ranks, use_wildcards, use_wildcards);
+    int phase_size = 2 * msg_per_phase;
+
+    operation *values = malloc(num_phases * phase_size * sizeof(operation));
+
+    for (int i = 0; i < num_phases; ++i) {
         memcpy(&values[i * phase_size], phase, phase_size * sizeof(operation));
     }
     free(phase);
@@ -220,7 +293,7 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
     firstprivate(pq_size, uq_size) reduction(max : pq_max, uq_max)
     {
         for (int n = 0; n < num_phases; ++n) {
-#pragma omp for schedule(static)
+#pragma omp for schedule(static, 1)
             for (long i = 0; i < phase_size; ++i) { // *2 send and recv
                 bool is_recv = operations[n * phase_size + i].is_recv;
                 int src = operations[n * phase_size + i].rank;
@@ -329,6 +402,7 @@ void run_for_all_implementations(char *sequence_name, int num_phases, int num_op
 void write_results_to_csv(const char *filename, experiment_result *results, size_t count,
                           int num_threads)
 {
+    printf("Write results to %s\n", filename);
     FILE *fp = fopen(filename, "w");
     if (!fp) {
         perror("Failed to open file");
@@ -352,7 +426,7 @@ void write_results_to_csv(const char *filename, experiment_result *results, size
     fclose(fp);
 }
 
-#define NUM_SEQUENCES 4
+#define NUM_SEQUENCES 7
 
 int main(int argc, char **argv)
 {
@@ -398,6 +472,7 @@ int main(int argc, char **argv)
                                         NUM_IMPLEMENTATIONS * repititions * NUM_SEQUENCES);
 
     for (int i = 0; i < repititions; ++i) {
+        printf("Run %d\n", i);
         // fully random
         int sequence = 0;
         operation *operations = prepare_envelopes_random(num_phases * num_tags_per_phase,
@@ -422,17 +497,40 @@ int main(int argc, char **argv)
         operations = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase, num_ranks,
                                                          false);
         res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
-        run_for_all_implementations("phase_no_wildcard", num_phases, num_tags_per_phase, operations,
-                                    false, false, res);
+        run_for_all_implementations("random_phase_no_wildcard", num_phases, num_tags_per_phase,
+                                    operations, false, false, res);
         free(operations);
 
         sequence++;
-
         operations = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase, num_ranks,
                                                          true);
         res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
-        run_for_all_implementations("phase_with_wildcard", num_phases, num_tags_per_phase,
+        run_for_all_implementations("random_phase_with_wildcard", num_phases, num_tags_per_phase,
                                     operations, true, true, res);
+        free(operations);
+
+        sequence++;
+        operations = prepare_envelopes_rsend_phases(num_phases, num_tags_per_phase, num_ranks,
+                                                    false);
+        res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
+        run_for_all_implementations("rsend_phase_no_wildcard", num_phases, num_tags_per_phase,
+                                    operations, false, false, res);
+        free(operations);
+
+        sequence++;
+        operations = prepare_envelopes_unexpected_phases(num_phases, num_tags_per_phase, num_ranks,
+                                                         false);
+        res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
+        run_for_all_implementations("unexpected_phase_no_wildcard", num_phases,
+                                    num_tags_per_phase, operations, false, false, res);
+        free(operations);
+
+        sequence++;
+        operations = prepare_envelopes_perfect_phases(num_phases, num_tags_per_phase, num_ranks,
+                                                      false);
+        res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
+        run_for_all_implementations("perfect_phase_no_wildcard", num_phases, num_tags_per_phase,
+                                    operations, false, false, res);
         free(operations);
     }
 
