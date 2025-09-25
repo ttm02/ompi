@@ -132,7 +132,7 @@ operation *prepare_envelopes_random(int num_ops, int num_tags, int num_ranks, bo
     free(ranks);
     if (use_wildcards) {
         printf("Percentage of Operations with Wildcards: %.3f %%\n",
-               num_wildcards / (double) (num_ops*2) * 100.0);
+               num_wildcards / (double) (num_ops * 2) * 100.0);
     }
     return values;
 }
@@ -361,7 +361,8 @@ int main(int argc, char **argv)
     int num_tags_per_phase = 100;
     int num_ranks = 20;
     int repititions = 3;
-    while ((opt = getopt(argc, argv, "n:t:p:r:")) != -1) {
+    char *output_file_name = "experiment_log";
+    while ((opt = getopt(argc, argv, "n:t:p:r:o:")) != -1) {
         switch (opt) {
         case 'n':
             num_phases = atol(optarg);
@@ -375,6 +376,12 @@ int main(int argc, char **argv)
         case 'r':
             repititions = atoi(optarg);
             break;
+        case 'o':
+            output_file_name = optarg;
+            break;
+        default:
+            printf("Unknown option: %c\n", opt);
+            exit(1);
         }
     }
     // init random seed
@@ -387,8 +394,8 @@ int main(int argc, char **argv)
 
     printf("Run with %d Threads\n", num_threads);
 
-    experiment_result *results = calloc(sizeof(experiment_result),  NUM_IMPLEMENTATIONS
-                                        * repititions * NUM_SEQUENCES);
+    experiment_result *results = calloc(sizeof(experiment_result),
+                                        NUM_IMPLEMENTATIONS * repititions * NUM_SEQUENCES);
 
     for (int i = 0; i < repititions; ++i) {
         // fully random
@@ -429,7 +436,7 @@ int main(int argc, char **argv)
         free(operations);
     }
 
-    write_results_to_csv("experiment_log", results,
+    write_results_to_csv(output_file_name, results,
                          NUM_IMPLEMENTATIONS * repititions * NUM_SEQUENCES, num_threads);
     free(results);
 
