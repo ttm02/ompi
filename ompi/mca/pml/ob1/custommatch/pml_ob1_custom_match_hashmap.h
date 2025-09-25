@@ -929,6 +929,12 @@ static inline void match_map_destroy(hashmap *map)
                 elem = next_elem;
             }
         }
+        bucket_node *elem = map->buckets[i].other_keys_bucket_head;
+        while (elem != NULL) {
+            bucket_node *next_elem = elem->next;
+            free(elem);
+            elem = next_elem;
+        }
     }
     bucket_node *elem = map->memory_pool;
     while (elem != NULL) {
