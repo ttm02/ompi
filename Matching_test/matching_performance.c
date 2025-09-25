@@ -86,57 +86,6 @@ static long diff_nsec(struct timespec *a, struct timespec *b)
     return (b->tv_sec - a->tv_sec) * 1000000000L + (b->tv_nsec - a->tv_nsec);
 }
 
-int *get_value_pool(int num_vals, int pool_range)
-{
-    // Pre-generate unique random tags from [0, pool_range)
-    assert(num_vals <= pool_range);
-    int *pool = malloc(pool_range * sizeof(int));
-    for (int i = 0; i < pool_range; ++i) {
-        pool[i] = i;
-    }
-    shuffle(pool, pool_range);
-    int *values = malloc(num_vals * sizeof(int));
-    for (int i = 0; i < num_vals; ++i) {
-        values[i] = pool[i];
-    } // select first N tags
-    free(pool);
-    return values;
-}
-
-operation *prepare_envelopes_random(int num_ops, int num_tags, int num_ranks, bool use_wildcards)
-{
-    int *tags = get_value_pool(num_tags, num_tags);
-    int *ranks = get_value_pool(num_ranks, num_ranks);
-    if (use_wildcards) {
-        tags[0] = OMPI_ANY_TAG;
-        ranks[0] = OMPI_ANY_SOURCE;
-    }
-    int num_wildcards = 0;
-
-    operation *values = malloc(num_ops * 2 * sizeof(struct operation));
-
-    for (int i = 0; i < num_ops * 2; ++i) {
-        int mode = rand() % 2;
-        int src = ranks[rand() % num_ranks];
-        int tag = tags[rand() % num_tags];
-        if (tag == OMPI_ANY_TAG || src == OMPI_ANY_SOURCE) {
-            mode = 1; // a wildcard operations must be a recv
-            num_wildcards++;
-        }
-
-        values[i].is_recv = mode;
-        values[i].rank = src;
-        values[i].tag = tag;
-    }
-    free(tags);
-    free(ranks);
-    if (use_wildcards) {
-        printf("Percentage of Operations with Wildcards: %.3f %%\n",
-               num_wildcards / (double) (num_ops * 2) * 100.0);
-    }
-    return values;
-}
-
 operation *get_phase(int msg_per_phase, int num_ranks, bool use_tag_wildcard,
                      bool use_rank_wildcard)
 {
@@ -200,6 +149,24 @@ void split_phase(operation *phase, int op_per_phase, bool revc_first)
 
     memcpy(phase, temp, op_per_phase * 2 * sizeof(operation));
     free(temp);
+}
+
+// random order of operations per phase, all phases interleaved: basically totally random, but we know all mgs muts match at some time
+operation *prepare_envelopes_random(int num_phases, int msg_per_phase, int num_ranks,
+                                               bool use_wildcards)
+{
+    operation *phase = get_phase(msg_per_phase, num_ranks, use_wildcards, use_wildcards);
+    int phase_size = 2 * msg_per_phase;
+
+    operation *values = malloc(num_phases * phase_size * sizeof(operation));
+    for (int i = 0; i < num_phases; ++i) {
+        memcpy(&values[i * phase_size], phase, phase_size * sizeof(operation));
+    }
+    free(phase);
+
+    int num_ops = num_phases * msg_per_phase * 2;
+    shuffle_op(values, num_ops);
+    return values;
 }
 
 // random order of operations per phase
@@ -294,7 +261,7 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
     {
         for (int n = 0; n < num_phases; ++n) {
 #pragma omp for schedule(static, 1)
-            for (long i = 0; i < phase_size; ++i) { // *2 send and recv
+            for (long i = 0; i < phase_size; ++i) {
                 bool is_recv = operations[n * phase_size + i].is_recv;
                 int src = operations[n * phase_size + i].rank;
                 int tag = operations[n * phase_size + i].tag;
@@ -475,27 +442,29 @@ int main(int argc, char **argv)
         printf("Run %d\n", i);
         // fully random
         int sequence = 0;
-        operation *operations = prepare_envelopes_random(num_phases * num_tags_per_phase,
-                                                         num_tags_per_phase, num_ranks, false);
-        experiment_result *res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS
-                                          + sequence * NUM_IMPLEMENTATIONS];
+        operation *operations;
+        experiment_result *res;
 
-        run_for_all_implementations("random_no_wildcard", num_phases, num_tags_per_phase,
+
+        operations = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks,
+                                                         false);
+        res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
+        run_for_all_implementations("random_no_wildcard", 1, num_phases*num_tags_per_phase,
                                     operations, false, false, res);
         free(operations);
 
         sequence++;
-        operations = prepare_envelopes_random(num_phases * num_tags_per_phase, num_tags_per_phase,
-                                              num_ranks, true);
+        operations = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks,
+                                                         true);
         res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
-        run_for_all_implementations("random_with_wildcard", num_phases, num_tags_per_phase,
+        run_for_all_implementations("random_with_wildcard", 1, num_phases*num_tags_per_phase,
                                     operations, true, true, res);
         free(operations);
+        // num_phases=1 such that there is no openmp sync
 
         sequence++;
-
         operations = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase, num_ranks,
-                                                         false);
+                                                 false);
         res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
         run_for_all_implementations("random_phase_no_wildcard", num_phases, num_tags_per_phase,
                                     operations, false, false, res);
