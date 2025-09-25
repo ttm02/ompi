@@ -34,7 +34,7 @@ typedef struct custom_match_prq_node
 
 typedef struct custom_match_prq
 {
-    opal_mutex_t mutex;
+    //opal_mutex_t mutex;
     custom_match_prq_node* head;
     custom_match_prq_node* tail;
     custom_match_prq_node* pool;
@@ -43,7 +43,7 @@ typedef struct custom_match_prq
 
 static inline int custom_match_prq_cancel(custom_match_prq* list, void* req)
 {
-    OB1_MATCHING_LOCK(&list->mutex);
+    //OB1_MATCHING_LOCK(&list->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("custom_match_prq_cancel - list: %x req: %x\n", list, req);
 #endif
@@ -75,19 +75,19 @@ static inline int custom_match_prq_cancel(custom_match_prq* list, void* req)
             elem->next = list->pool;
             list->pool = elem;
             list->size--;
-            OB1_MATCHING_UNLOCK(&list->mutex);
+            //OB1_MATCHING_UNLOCK(&list->mutex);
             return 1;
         }
         prev = elem;
         elem = elem->next;
     }
-    OB1_MATCHING_UNLOCK(&list->mutex);
+    //OB1_MATCHING_UNLOCK(&list->mutex);
     return 0;
 }
 
 static inline void* custom_match_prq_find_verify(custom_match_prq* list, int tag, int peer)
 {
-    OB1_MATCHING_LOCK(&list->mutex);
+    //OB1_MATCHING_LOCK(&list->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("custom_match_prq_find_verify list: %x tag: %x peer: %x\n", list, tag, peer);
 #endif
@@ -100,18 +100,18 @@ static inline void* custom_match_prq_find_verify(custom_match_prq* list, int tag
             ((elem->src & elem->smask) == (peer & elem->smask));
         if(result)
         {
-            OB1_MATCHING_UNLOCK(&list->mutex);
+            //OB1_MATCHING_UNLOCK(&list->mutex);
             return elem->value;
         }
         elem = elem->next;
     }
-    OB1_MATCHING_UNLOCK(&list->mutex);
+    //OB1_MATCHING_UNLOCK(&list->mutex);
     return 0;
 }
 
 static inline void* custom_match_prq_find_dequeue_verify(custom_match_prq* list, int tag, int peer)
 {
-    OB1_MATCHING_LOCK(&list->mutex);
+    //OB1_MATCHING_LOCK(&list->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("custom_match_prq_find_dequeue_verify list: %x:%d tag: %x peer: %x\n", list, list->size, tag, peer);
 #endif
@@ -153,13 +153,13 @@ static inline void* custom_match_prq_find_dequeue_verify(custom_match_prq* list,
 #if CUSTOM_MATCH_DEBUG_VERBOSE
             printf("Found list: %x tag: %x peer: %x\n", list, req->req_tag, req->req_peer);
 #endif
-            OB1_MATCHING_UNLOCK(&list->mutex);
+            //OB1_MATCHING_UNLOCK(&list->mutex);
             return payload;
         }
         prev = elem;
         elem = elem->next;
     }
-    OB1_MATCHING_UNLOCK(&list->mutex);
+    //OB1_MATCHING_UNLOCK(&list->mutex);
     return 0;
 }
 
@@ -188,7 +188,7 @@ static inline void custom_match_prq_append(custom_match_prq* list, void* payload
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("custom_match_prq_append list: %x tag: %x source: %x tag: %x peer: %x\n", list, tag, source, req->req_tag, req->req_peer);
 #endif
-    OB1_MATCHING_LOCK(&list->mutex);
+    //OB1_MATCHING_LOCK(&list->mutex);
     int i;
     custom_match_prq_node* elem;
 #if CUSTOM_MATCH_DEBUG_VERBOSE
@@ -225,7 +225,7 @@ static inline void custom_match_prq_append(custom_match_prq* list, void* payload
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("Exiting custom_match_prq_append\n");
 #endif
-    OB1_MATCHING_UNLOCK(&list->mutex);
+    //OB1_MATCHING_UNLOCK(&list->mutex);
 }
 
 static inline int custom_match_prq_size(custom_match_prq* list)
@@ -239,7 +239,7 @@ static inline custom_match_prq* custom_match_prq_init()
     printf("custom_match_prq_init\n");
 #endif
     custom_match_prq* list = malloc(sizeof(custom_match_prq));
-    OBJ_CONSTRUCT(&list->mutex, opal_mutex_t);
+    //OBJ_CONSTRUCT(&list->mutex, opal_mutex_t);
     list->head = 0;
     list->tail = 0;
     list->pool = 0;
@@ -269,7 +269,7 @@ static inline void custom_match_prq_destroy(custom_match_prq* list)
         free(elem);
         j++;
     }
-    OBJ_DESTRUCT(&list->mutex);
+    //OBJ_DESTRUCT(&list->mutex);
     free(list);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("Number of prq elements destroyed = %d %d\n", i, j);
@@ -335,7 +335,7 @@ typedef struct custom_match_umq_node
 
 typedef struct custom_match_umq
 {
-    opal_mutex_t mutex;
+    //opal_mutex_t mutex;
     custom_match_umq_node* head;
     custom_match_umq_node* tail;
     custom_match_umq_node* pool;
@@ -346,7 +346,7 @@ static inline void custom_match_umq_dump(custom_match_umq* list);
 
 static inline void* custom_match_umq_find_verify_hold(custom_match_umq* list, int tag, int peer, custom_match_umq_node** hold_prev, custom_match_umq_node** hold_elem, int* hold_index)
 {
-    OB1_MATCHING_LOCK(&list->mutex);
+    //OB1_MATCHING_LOCK(&list->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("custom_match_umq_find_verify_hold list: %x:%d tag: %x peer: %x\n", list, list->size, tag, peer);
     custom_match_umq_dump(list);
@@ -382,20 +382,20 @@ static inline void* custom_match_umq_find_verify_hold(custom_match_umq* list, in
             *hold_prev = prev;
             *hold_elem = elem;
             *hold_index = 0;
-            OB1_MATCHING_UNLOCK(&list->mutex);
+            //OB1_MATCHING_UNLOCK(&list->mutex);
             return elem->value;
         }
         prev = elem;
         elem = elem->next;
     }
-    OB1_MATCHING_UNLOCK(&list->mutex);
+    //OB1_MATCHING_UNLOCK(&list->mutex);
     return 0;
 }
 
 
 static inline void custom_match_umq_remove_hold(custom_match_umq* list, custom_match_umq_node* prev, custom_match_umq_node* elem, int i)
 {
-    OB1_MATCHING_LOCK(&list->mutex);
+    //OB1_MATCHING_LOCK(&list->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("custom_match_umq_find_remove_hold %x %x %x\n", prev, elem, i);
 #endif
@@ -417,12 +417,12 @@ static inline void custom_match_umq_remove_hold(custom_match_umq* list, custom_m
     elem->next = list->pool;
     list->pool = elem;
     list->size--;
-    OB1_MATCHING_UNLOCK(&list->mutex);
+    //OB1_MATCHING_UNLOCK(&list->mutex);
 }
 
 static inline void custom_match_umq_append(custom_match_umq* list, int tag, int source, void* payload)
 {
-    OB1_MATCHING_LOCK(&list->mutex);
+    //OB1_MATCHING_LOCK(&list->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("custom_match_umq_append list: %x payload: %x tag: %d src: %d\n", list,  payload, tag, source);
 #endif
@@ -469,7 +469,7 @@ static inline void custom_match_umq_append(custom_match_umq* list, int tag, int 
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     custom_match_umq_dump(list);
 #endif
-    OB1_MATCHING_UNLOCK(&list->mutex);
+ //   OB1_MATCHING_UNLOCK(&list->mutex);
 }
 
 static inline custom_match_umq* custom_match_umq_init()
@@ -478,7 +478,7 @@ static inline custom_match_umq* custom_match_umq_init()
     printf("custom_match_umq_init\n");
 #endif
     custom_match_umq* list = malloc(sizeof(custom_match_umq));
-    OBJ_CONSTRUCT(&list->mutex, opal_mutex_t);
+   // OBJ_CONSTRUCT(&list->mutex, opal_mutex_t);
     list->head = 0;
     list->tail = 0;
     list->pool = 0;
@@ -508,7 +508,7 @@ static inline void custom_match_umq_destroy(custom_match_umq* list)
         free(elem);
         j++;
     }
-    OBJ_DESTRUCT(&list->mutex);
+    //OBJ_DESTRUCT(&list->mutex);
     free(list);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("Number of umq elements destroyed = %d %d\n", i, j);
