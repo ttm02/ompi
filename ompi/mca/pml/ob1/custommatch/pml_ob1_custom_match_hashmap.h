@@ -427,7 +427,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
     printf("add (%d,%d) to %s \n",tag,peer, false?"prq":"umq");
 #endif
     OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
-    OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+    //OB1_MATCHING_UNLOCK(&my_bucket->mutex);
     return NULL;
 
 
@@ -446,7 +446,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
                 map->wildcard_bucket_tail= prev_elem;
             }
             OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
-            OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+            //OB1_MATCHING_UNLOCK(&my_bucket->mutex);
             return elem;
         }
         prev_elem = elem;
