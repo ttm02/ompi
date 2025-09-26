@@ -112,11 +112,10 @@ static inline int matching_hash_func(int tag, int peer)
     return ((tag& mask) + peer) % NUM_BUCKETS;
 }
 
-
 static inline void* to_memory_pool(hashmap *map, bucket_node *node)
 {
     void* retval = __atomic_load_n(&node->value,__ATOMIC_ACQUIRE);
-    while (NULL == retval) {
+    while (OPAL_UNLIKELY(NULL == retval)) {
         // wait until other thread has finished initializing this value
         retval=__atomic_load_n(&node->value,__ATOMIC_ACQUIRE);
     }
@@ -753,11 +752,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
         assert(is_recv);// incoming msg cant have wildcards
         return match_with_wildcard(map, tag, peer, to_fill);
     }
-
-
     //pthread_rwlock_rdlock(&map->rwlock);
-
-
 #endif
 
 #if CUSTOM_MATCH_DEBUG_VERBOSE
@@ -767,7 +762,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 //    bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
     OB1_MATCHING_LOCK(&my_bucket->mutex);
 #ifdef WILDCARD_SUPPORT
-    if ( OPAL_UNLIKELY(!is_recv && map->wildcard_bucket_head!=NULL)) {
+    if ( !is_recv && OPAL_UNLIKELY( map->wildcard_bucket_head!=NULL)) {
         bucket_node *elem_to_dequeue  = try_match_from_wildcard_prq(map,tag,peer,to_fill);
         if (elem_to_dequeue) {
             OB1_MATCHING_UNLOCK(&my_bucket->mutex);
