@@ -433,6 +433,12 @@ int main(int argc, char **argv)
 #pragma omp single
     num_threads = omp_get_num_threads();
 
+
+    if (num_threads==1) {
+        // no need for locking
+        mca_pml_ob1_matching_protection = false;
+    }
+
     printf("Run with %d Threads\n", num_threads);
 
     experiment_result *results = calloc(sizeof(experiment_result),
@@ -501,6 +507,7 @@ int main(int argc, char **argv)
         run_for_all_implementations("perfect_phase_no_wildcard", num_phases, num_tags_per_phase,
                                     operations, false, false, res);
         free(operations);
+
     }
 
     write_results_to_csv(output_file_name, results,
