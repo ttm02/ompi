@@ -276,7 +276,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
     OB1_MATCHING_LOCK(&map->wildcard_mutex);
 // need to check if msg in normal bucket is older
     bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
-    OB1_MATCHING_LOCK(&my_bucket->mutex);
+//    OB1_MATCHING_LOCK(&my_bucket->mutex);
 
     // other threads may change this, but as we locked all relevant buckets, that's not a problem
     int current_seq = __atomic_load_n(&map->seq_num,__ATOMIC_RELAXED);
@@ -327,7 +327,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
                     *to_fill = &new_elem->value;
                     insert_to_list(&my_bucket->buckets[i], new_elem, false);
                     OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
-                    OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+  //                  OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                     return NULL;
                 }
                 }else {
@@ -337,7 +337,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
                     }else {
                         bucket_node *to_remove= remove_from_list(&my_bucket->buckets[i]);
                         OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
-                        OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+    //                    OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                         return to_remove;
                     }
                 }
@@ -370,7 +370,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
                 printf("add (%d,%d) to %s \n",tag,peer, false?"prq":"umq");
 #endif
                 OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
-                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+      //          OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                 return NULL;
             } else {
                 if (in_wildcard && is_older(in_wildcard->seq_num,elem->seq_num,current_seq)) {
@@ -392,7 +392,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
                 printf("matched (%d,%d) from %s \n",tag,peer, !false?"prq":"umq");
 #endif
                 OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
-                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+//                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
                 return elem;
             }
         }
