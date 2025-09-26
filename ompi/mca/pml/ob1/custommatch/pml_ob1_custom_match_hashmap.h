@@ -83,7 +83,6 @@ typedef struct bucket_collection {
 
 typedef struct hashmap {
 #ifdef WILDCARD_SUPPORT
-    pthread_rwlock_t rwlock;
     bucket_node *wildcard_bucket_head;
     bucket_node *wildcard_bucket_tail;
     opal_mutex_t wildcard_mutex; // guarding the wildcard bucket
@@ -496,7 +495,12 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
 
 static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void*** to_fill)
 {
-    pthread_rwlock_wrlock(&map->rwlock);
+
+    //lock ALL buckets
+    OB1_MATCHING_LOCK(&map->wildcard_mutex);
+    for (int i =0;i<NUM_BUCKETS;++i) {
+        OB1_MATCHING_LOCK(&map->buckets[i].mutex);
+    }
 
     bucket_node* current_oldest=NULL;
     bucket_collection* oldest_bucket=NULL;
@@ -569,7 +573,11 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
                                     oldest_bucket->buckets[j].bucket_tail = NULL;
                                 }
 
-                                pthread_rwlock_unlock(&map->rwlock);
+                                // unlock ALL
+                                OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+                                for (int i =0;i<NUM_BUCKETS;++i) {
+                                    OB1_MATCHING_UNLOCK(&map->buckets[i].mutex);
+                                }
                                 return to_memory_pool(map, elem);
                             }
                             prev_elem = elem;
@@ -591,7 +599,11 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
                             oldest_bucket->other_keys_bucket_tail = prev_elem;
                         }
 
-                        pthread_rwlock_unlock(&map->rwlock);
+                        // unlock ALL
+                        OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+                        for (int i =0;i<NUM_BUCKETS;++i) {
+                            OB1_MATCHING_UNLOCK(&map->buckets[i].mutex);
+                        }
                         return to_memory_pool(map, elem);
                     }
                     prev_elem = elem;
@@ -618,7 +630,11 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
     }
     map->wildcard_bucket_tail = new_elem;
 
-    pthread_rwlock_unlock(&map->rwlock);
+    // unlock ALL
+    OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+    for (int i =0;i<NUM_BUCKETS;++i) {
+        OB1_MATCHING_UNLOCK(&map->buckets[i].mutex);
+    }
     return NULL;
 
 }
@@ -626,7 +642,11 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
 #else
 static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void*** to_fill)
 {
-    pthread_rwlock_wrlock(&map->rwlock);
+    //lock ALL buckets
+    OB1_MATCHING_LOCK(&map->wildcard_mutex);
+    for (int i =0;i<NUM_BUCKETS;++i) {
+        OB1_MATCHING_LOCK(&map->buckets[i].mutex);
+    }
 
     bucket_node* current_oldest=NULL;
     bucket_collection* oldest_bucket=NULL;
@@ -651,7 +671,11 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
                             my_bucket->buckets[j].bucket_tail = NULL;
                         }
 
-                        pthread_rwlock_unlock(&map->rwlock);
+                        //unlock ALL buckets
+                        OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+                        for (int ii =0;ii<NUM_BUCKETS;++ii) {
+                            OB1_MATCHING_UNLOCK(&map->buckets[ii].mutex);
+                        }
                         return to_memory_pool(map, elem);
                     }
                     prev_elem = elem;
@@ -674,7 +698,11 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
                     // removal of last element
                     my_bucket->other_keys_bucket_tail = prev_elem;
                 }
-                pthread_rwlock_unlock(&map->rwlock);
+                //unlock ALL buckets
+                OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+                for (int ii =0;ii<NUM_BUCKETS;++ii) {
+                    OB1_MATCHING_UNLOCK(&map->buckets[ii].mutex);
+                }
                 return to_memory_pool(map, elem);
             }
             prev_elem= elem;
@@ -699,7 +727,11 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
     }
     map->wildcard_bucket_tail = new_elem;
 
-    pthread_rwlock_unlock(&map->rwlock);
+    //unlock ALL buckets
+    OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
+    for (int ii =0;ii<NUM_BUCKETS;++ii) {
+        OB1_MATCHING_UNLOCK(&map->buckets[ii].mutex);
+    }
     return NULL;
 
 }
@@ -712,29 +744,19 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
 // to_fill will be set to void** where the actual payload data needs to be dropped, if elem is inserted
 static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void*** to_fill, bool is_recv)
 {
+    bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
+
 #ifdef WILDCARD_SUPPORT
 
-    if ( peer == OMPI_ANY_SOURCE || tag == OMPI_ANY_TAG)
+    if ( OPAL_UNLIKELY(peer == OMPI_ANY_SOURCE || tag == OMPI_ANY_TAG))
     {
         assert(is_recv);// incoming msg cant have wildcards
         return match_with_wildcard(map, tag, peer, to_fill);
     }
 
-    pthread_rwlock_rdlock(&map->rwlock);
-    // no need for atomic operation, as write only happens on writelock
-    if ( OPAL_UNLIKELY(!is_recv && map->wildcard_bucket_head!=NULL)) {
-        bucket_node *elem_to_dequeue  = try_match_from_wildcard_prq(map,tag,peer,to_fill);
-        if (elem_to_dequeue) {
-            pthread_rwlock_unlock(&map->rwlock);
-            return to_memory_pool(map, elem_to_dequeue);
-        }
-#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
-        else {
-            pthread_rwlock_unlock(&map->rwlock);
-            return NULL;
-        }
-#endif
-    }
+
+    //pthread_rwlock_rdlock(&map->rwlock);
+
 
 #endif
 
@@ -742,8 +764,23 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     printf("%s try match (%d,%d)\n",is_recv?"recv posted":"msg arrived",tag,peer);
 #endif
     //printf("access bucket %d (%d,%d,%d)\n",matching_hash_func(tag, peer),tag,peer,is_recv);
-    bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
+//    bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
     OB1_MATCHING_LOCK(&my_bucket->mutex);
+#ifdef WILDCARD_SUPPORT
+    if ( OPAL_UNLIKELY(!is_recv && map->wildcard_bucket_head!=NULL)) {
+        bucket_node *elem_to_dequeue  = try_match_from_wildcard_prq(map,tag,peer,to_fill);
+        if (elem_to_dequeue) {
+            OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+            return to_memory_pool(map, elem_to_dequeue);
+        }
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+        else {
+            OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+            return NULL;
+        }
+#endif
+    }
+#endif
 
     for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
         if (OPAL_UNLIKELY(my_bucket->buckets[i].tag == -1)) {
@@ -775,9 +812,6 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 #if CUSTOM_MATCH_DEBUG_VERBOSE
                 printf("add (%d,%d) to %s \n",tag,peer, is_recv?"prq":"umq");
 #endif
-#ifdef WILDCARD_SUPPORT
-                pthread_rwlock_unlock(&map->rwlock);
-#endif
                 return NULL; // inserted into queue without a match
 
             } else {
@@ -787,9 +821,6 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
                 printf("matched (%d,%d) from %s \n",tag,peer, !is_recv?"prq":"umq");
-#endif
-#ifdef WILDCARD_SUPPORT
-                pthread_rwlock_unlock(&map->rwlock);
 #endif
                 // free element
                 return to_memory_pool(map, elem_to_dequeue);
@@ -828,9 +859,6 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 #if CUSTOM_MATCH_DEBUG_VERBOSE
                 printf("add (%d,%d) to %s \n",tag,peer, is_recv?"prq":"umq");
 #endif
-#ifdef WILDCARD_SUPPORT
-                pthread_rwlock_unlock(&map->rwlock);
-#endif
                 return NULL;
             } else {
                 // match: dequeue
@@ -850,10 +878,6 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 #if CUSTOM_MATCH_DEBUG_VERBOSE
                 printf("matched (%d,%d) from %s \n",tag,peer, !is_recv?"prq":"umq");
 #endif
-#ifdef WILDCARD_SUPPORT
-                pthread_rwlock_unlock(&map->rwlock);
-#endif
-
                 return to_memory_pool(map, elem);
             }
         }
@@ -884,9 +908,6 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 #if CUSTOM_MATCH_DEBUG_VERBOSE
     printf("add (%d,%d) to %s \n",tag,peer, is_recv?"prq":"umq");
 #endif
-#ifdef WILDCARD_SUPPORT
-    pthread_rwlock_unlock(&map->rwlock);
-#endif
     return NULL;
 }
 
@@ -896,7 +917,6 @@ static inline hashmap *match_map_init(void)
 
     // initialize the locks
 #ifdef WILDCARD_SUPPORT
-    pthread_rwlock_init(&map->rwlock, NULL);
         OBJ_CONSTRUCT(&map->wildcard_mutex, opal_mutex_t);
 #ifdef WILDCARD_NO_OVERTAKE_SUPPORT
     map->seq_num=0;
@@ -920,7 +940,6 @@ static inline void match_map_destroy(hashmap *map)
 #endif
 
 #ifdef WILDCARD_SUPPORT
-    pthread_rwlock_destroy(&map->rwlock);
         OBJ_DESTRUCT(&map->wildcard_mutex);
 #endif
     OBJ_DESTRUCT(&map->mutex);
