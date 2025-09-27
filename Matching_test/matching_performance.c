@@ -240,6 +240,9 @@ operation *prepare_envelopes_perfect_phases(int num_phases, int msg_per_phase, i
     return values;
 }
 
+#define target_number_of_operations 1000000000
+// repeat the experiment as many times as necessary to reach targed_operations
+
 void run_experiment(const int num_phases, const int num_ops_per_phase, const operation *operations,
                     experiment_result *result, void *(*init_matching_queues)(),
                     void (*destroy_matching_queues)(void *),
@@ -253,55 +256,63 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
     long umq_appends = 0, umq_dequeues = 0;
     int pq_size = 0, uq_size = 0;
     int pq_max = 0, uq_max = 0;
+    int num_rep_to_reach_target = target_number_of_operations/ (num_phases * phase_size);
+    if (target_number_of_operations % (num_phases * phase_size)) {
+        num_rep_to_reach_target++;
+    }
+
+    double num_ops = num_rep_to_reach_target*num_phases * phase_size;
 
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
 #pragma omp parallel reduction(+ : prq_appends, prq_dequeues, umq_appends, umq_dequeues) \
     firstprivate(pq_size, uq_size) reduction(max : pq_max, uq_max)
     {
-        for (int n = 0; n < num_phases; ++n) {
+       for (int n = 0; n < num_rep_to_reach_target; ++n) {
+            for (int n = 0; n < num_phases; ++n) {
 #pragma omp for schedule(static, 1)
-            for (long i = 0; i < phase_size; ++i) {
-                bool is_recv = operations[n * phase_size + i].is_recv;
-                int src = operations[n * phase_size + i].rank;
-                int tag = operations[n * phase_size + i].tag;
+                for (long i = 0; i < phase_size; ++i) {
+                    bool is_recv = operations[n * phase_size + i].is_recv;
+                    int src = operations[n * phase_size + i].rank;
+                    int tag = operations[n * phase_size + i].tag;
 
-                void *payload = (void *) (uintptr_t) i + 1; // not null palyoad
-                if (!is_recv) {
-                    // Operation 1: message arrival
-                    // search posted receives (PRQ)
-                    if (try_match_incoming(matching_queue, tag, src, payload)) {
-                        --pq_size;
-                        prq_dequeues++;
+                    void *payload = (void *) (uintptr_t) i + 1; // not null palyoad
+                    if (!is_recv) {
+                        // Operation 1: message arrival
+                        // search posted receives (PRQ)
+                        if (try_match_incoming(matching_queue, tag, src, payload)) {
+                            --pq_size;
+                            prq_dequeues++;
+                        } else {
+                            umq_appends++;
+                            ++uq_size;
+                            if (uq_size > uq_max) {
+                                uq_max = uq_size;
+                            }
+                        }
                     } else {
-                        umq_appends++;
-                        ++uq_size;
-                        if (uq_size > uq_max) {
-                            uq_max = uq_size;
+                        // Operation 2: receive posted
+                        // search unexpected messages (UMQ)
+
+                        if (try_match_receive(matching_queue, tag, src, payload)) {
+                            // matched => do nothing else
+                            umq_dequeues++;
+                            uq_size--;
+                        } else {
+                            // not found => post receive into PRQ
+                            prq_appends++;
+                            pq_size++;
+                            if (pq_size > pq_max)
+                                pq_max = pq_size;
                         }
                     }
-                } else {
-                    // Operation 2: receive posted
-                    // search unexpected messages (UMQ)
-
-                    if (try_match_receive(matching_queue, tag, src, payload)) {
-                        // matched => do nothing else
-                        umq_dequeues++;
-                        uq_size--;
-                    } else {
-                        // not found => post receive into PRQ
-                        prq_appends++;
-                        pq_size++;
-                        if (pq_size > pq_max)
-                            pq_max = pq_size;
-                    }
-                }
-            } // implicit OpenMP barrier
+                } // implicit OpenMP barrier
+            }
         }
     }
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
-    double num_ops = num_phases * phase_size;
+
     double total_ms = diff_nsec(&t0, &t1) / 1e6;
     double ops_per_sec = num_ops / (total_ms / 1000.0);
     /*
@@ -393,10 +404,12 @@ void write_results_to_csv(const char *filename, experiment_result *results, size
     fclose(fp);
 }
 
+
 #define NUM_SEQUENCES 7
 
 int main(int argc, char **argv)
 {
+
     int opt;
     int num_phases = 100;
     int num_tags_per_phase = 100;
