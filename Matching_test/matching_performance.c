@@ -405,7 +405,7 @@ void write_results_to_csv(const char *filename, experiment_result *results, size
 }
 
 
-#define NUM_SEQUENCES 7
+#define NUM_SEQUENCES 2
 
 int main(int argc, char **argv)
 {
@@ -464,7 +464,7 @@ int main(int argc, char **argv)
         operation *operations;
         experiment_result *res;
 
-
+/*
         operations = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks,
                                                          false);
         res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
@@ -482,6 +482,7 @@ int main(int argc, char **argv)
         // num_phases=1 such that there is no openmp sync
 
         sequence++;
+        */
         operations = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase, num_ranks,
                                                  false);
         res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
@@ -489,6 +490,7 @@ int main(int argc, char **argv)
                                     operations, false, false, res);
         free(operations);
 
+        /*
         sequence++;
         operations = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase, num_ranks,
                                                          true);
@@ -496,7 +498,7 @@ int main(int argc, char **argv)
         run_for_all_implementations("random_phase_with_wildcard", num_phases, num_tags_per_phase,
                                     operations, true, true, res);
         free(operations);
-
+*/
         sequence++;
         operations = prepare_envelopes_rsend_phases(num_phases, num_tags_per_phase, num_ranks,
                                                     false);
@@ -504,7 +506,7 @@ int main(int argc, char **argv)
         run_for_all_implementations("rsend_phase_no_wildcard", num_phases, num_tags_per_phase,
                                     operations, false, false, res);
         free(operations);
-
+/*
         sequence++;
         operations = prepare_envelopes_unexpected_phases(num_phases, num_tags_per_phase, num_ranks,
                                                          false);
@@ -520,6 +522,7 @@ int main(int argc, char **argv)
         run_for_all_implementations("perfect_phase_no_wildcard", num_phases, num_tags_per_phase,
                                     operations, false, false, res);
         free(operations);
+    */
 
     }
 
