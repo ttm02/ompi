@@ -261,9 +261,9 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
 
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
-#pragma omp parallel reduction(+ : prq_appends, prq_dequeues, umq_appends, umq_dequeues) \
+#pragma omp parallel reduction(+ : prq_appends, prq_dequeues, umq_appends, umq_dequeues, average_prq_size, average_umq_size) \
     firstprivate(pq_size, uq_size)                                                       \
-    reduction(max : pq_max, uq_max, average_prq_size, average_umq_size)
+    reduction(max : pq_max, uq_max)
     {
             for (int n = 0; n < num_phases; ++n) {
 #pragma omp for schedule(static, 1)
