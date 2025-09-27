@@ -44,10 +44,12 @@
 
 #define COUNT_COLLISIONS
 
-//#define WILDCARD_SUPPORT
-//#define WILDCARD_NO_OVERTAKE_SUPPORT
-
+#ifndef OUTSIDE_CONFIGURATION
+#define WILDCARD_SUPPORT
+#define WILDCARD_NO_OVERTAKE_SUPPORT
 #define BRANCHLESS_BUCKET_SELECTOR
+#define ADAPT_BUCKETS
+#endif
 
 
 #ifdef WILDCARD_NO_OVERTAKE_SUPPORT
@@ -856,8 +858,6 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
             goto find_sub_bucket;
         }
     }
-
-
 
 
     // multiple hash collisions

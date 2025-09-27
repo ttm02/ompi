@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include "hashmap_matching_queue_no_wildcard.h"
 
+#define OUTSIDE_CONFIGURATION
 #define NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
 
 #include "../ompi/mca/pml/ob1/custommatch/pml_ob1_custom_match_hashmap.h"

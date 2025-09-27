@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include "hashmap_matching_queue_overtake_wildcard.h"
 
+#define OUTSIDE_CONFIGURATION
 #define NO_DEBUGGING_UNDER_PERFORMANCE_TESTING
 #define WILDCARD_SUPPORT
 
