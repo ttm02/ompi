@@ -833,7 +833,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
             } else {
                 // not empty and holds the other queue
                 // dequeue matching element
-                bucket_node *elem_to_dequeue = remove_from_list(sub_bucket;
+                bucket_node *elem_to_dequeue = remove_from_list(sub_bucket);
                 OB1_MATCHING_UNLOCK(&my_bucket->mutex);
 #if CUSTOM_MATCH_DEBUG_VERBOSE
                 printf("matched (%d,%d) from %s \n",tag,peer, !is_recv?"prq":"umq");
