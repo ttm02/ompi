@@ -243,8 +243,6 @@ operation *prepare_envelopes_perfect_phases(int num_phases, int msg_per_phase, i
     return values;
 }
 
-#define target_number_of_operations 1000000
-// repeat the experiment as many times as necessary to reach targed_operations
 
 void run_experiment(const int num_phases, const int num_ops_per_phase, const operation *operations,
                     experiment_result *result, void *(*init_matching_queues)(),
@@ -260,12 +258,6 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
     int pq_size = 0, uq_size = 0;
     long average_prq_size = 0, average_umq_size = 0;
     int pq_max = 0, uq_max = 0;
-    int num_rep_to_reach_target = target_number_of_operations / (num_phases * phase_size);
-    if (target_number_of_operations % (num_phases * phase_size)) {
-        num_rep_to_reach_target++;
-    }
-
-    double num_ops = num_rep_to_reach_target * num_phases * phase_size;
 
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -273,7 +265,6 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
     firstprivate(pq_size, uq_size)                                                       \
     reduction(max : pq_max, uq_max, average_prq_size, average_umq_size)
     {
-        for (int n = 0; n < num_rep_to_reach_target; ++n) {
             for (int n = 0; n < num_phases; ++n) {
 #pragma omp for schedule(static, 1)
                 for (long i = 0; i < phase_size; ++i) {
@@ -323,10 +314,11 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
                     average_umq_size += uq_size;
                 } // implicit OpenMP barrier
             }
-        }
+
     }
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
+    double num_ops = num_phases * phase_size;
     double total_ms = diff_nsec(&t0, &t1) / 1e6;
     double ops_per_sec = num_ops / (total_ms / 1000.0);
     /*
@@ -336,8 +328,8 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
     printf("UMQ appends: %ld, UMQ dequeues: %ld, UMQ max size: %d\n", umq_appends, umq_dequeues,
            uq_max);
            */
-    result->pq_avg = average_prq_size / (double) num_ops;
-    result->uq_avg = average_umq_size / (double) num_ops;
+    result->pq_avg = average_prq_size / num_ops;
+    result->uq_avg = average_umq_size / num_ops;
     result->pq_max = pq_max;
     result->uq_max = uq_max;
     result->time = total_ms;
