@@ -25,6 +25,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 //TODO: reduce the amount of duplicate code when traversing the buckets!!
 
@@ -45,6 +46,8 @@
 
 //#define WILDCARD_SUPPORT
 //#define WILDCARD_NO_OVERTAKE_SUPPORT
+
+#define BRANCHLESS_BUCKET_SELECTOR
 
 
 #ifdef WILDCARD_NO_OVERTAKE_SUPPORT
@@ -767,7 +770,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     printf("%s try match (%d,%d)\n",is_recv?"recv posted":"msg arrived",tag,peer);
 #endif
     //printf("access bucket %d (%d,%d,%d)\n",matching_hash_func(tag, peer),tag,peer,is_recv);
-//    bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
+    //    bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
     OB1_MATCHING_LOCK(&my_bucket->mutex);
 #ifdef WILDCARD_SUPPORT
     if ( !is_recv && OPAL_UNLIKELY( map->wildcard_bucket.bucket_head!=NULL)) {
@@ -788,6 +791,60 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     // branchless find the correct bucket
     // if in overflow bucket: check for initialization and then goto back
 
+    find_sub_bucket:
+
+    struct bucket* sub_bucket=&my_bucket->overflow_bucket;
+    for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
+#ifdef BRANCHLESS_BUCKET_SELECTOR
+        // definitely branchless
+        int condition = (my_bucket->bucket_infos[i].tag == tag) & (my_bucket->bucket_infos[i].peer == peer);
+        uintptr_t mask = -condition;
+
+        uintptr_t new_ptr = (uintptr_t)&my_bucket->buckets[i];
+        uintptr_t old_ptr = (uintptr_t)sub_bucket;
+
+        sub_bucket = (struct bucket*)((new_ptr & mask) | (old_ptr & ~mask));
+#else
+        // possibly branchless
+        sub_bucket= my_bucket->bucket_infos[i].tag == tag & my_bucket->bucket_infos[i].peer == peer ? &my_bucket->buckets[i]: sub_bucket;
+#endif
+
+    }
+    if (OPAL_LIKELY(sub_bucket!=&my_bucket->overflow_bucket)) {
+        // if list empty or same mode: insert to queue
+        if (sub_bucket->is_recv == is_recv
+            || sub_bucket->bucket_head == NULL) {
+            bucket_node *new_elem = get_bucket_node(map);
+            new_elem->tag = tag;
+            new_elem->peer = peer;
+            new_elem->next = NULL;
+#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
+            new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
+#endif
+            new_elem->is_recv = is_recv;
+            assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
+            *to_fill = &new_elem->value;
+            insert_to_list(sub_bucket, new_elem, is_recv);
+            OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+            printf("add (%d,%d) to %s \n",tag,peer, is_recv?"prq":"umq");
+#endif
+            return NULL; // inserted into queue without a match
+            } else {
+                // not empty and holds the other queue
+                // dequeue matching element
+                bucket_node *elem_to_dequeue = remove_from_list(sub_bucket;
+                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
+#if CUSTOM_MATCH_DEBUG_VERBOSE
+                printf("matched (%d,%d) from %s \n",tag,peer, !is_recv?"prq":"umq");
+#endif
+                // free element
+                return to_memory_pool(map, elem_to_dequeue);
+            }
+    }
+
+    // check if all buckes where initialized
+    //TODO at this point one can also update the direct buckets if necessary
     for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
         if (OPAL_UNLIKELY(my_bucket->bucket_infos[i].tag == -1)) {
             // initialize on first use
@@ -796,43 +853,13 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 #if CUSTOM_MATCH_DEBUG_VERBOSE
             printf("initialize bucket %d_%d: (%d,%d)\n",matching_hash_func(tag, peer),i,tag,peer);
 #endif
-        }
-        if (OPAL_LIKELY(my_bucket->bucket_infos[i].tag == tag && my_bucket->bucket_infos[i].peer == peer)) {
-            // found correct bucket
-
-            // if list empty or same mode: insert to queue
-            if (my_bucket->buckets[i].is_recv == is_recv
-                || my_bucket->buckets[i].bucket_head == NULL) {
-                bucket_node *new_elem = get_bucket_node(map);
-                new_elem->tag = tag;
-                new_elem->peer = peer;
-                new_elem->next = NULL;
-#ifdef WILDCARD_NO_OVERTAKE_SUPPORT
-      new_elem->seq_num=__atomic_add_fetch(&map->seq_num,1,__ATOMIC_RELAXED);
-#endif
-                new_elem->is_recv = is_recv;
-                assert(__atomic_load_n(&new_elem->value,__ATOMIC_RELAXED)==NULL);
-                *to_fill = &new_elem->value;
-                insert_to_list(&my_bucket->buckets[i], new_elem, is_recv);
-                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
-#if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("add (%d,%d) to %s \n",tag,peer, is_recv?"prq":"umq");
-#endif
-                return NULL; // inserted into queue without a match
-
-            } else {
-                // not empty and holds the other queue
-                // dequeue matching element
-                bucket_node *elem_to_dequeue = remove_from_list(&my_bucket->buckets[i]);
-                OB1_MATCHING_UNLOCK(&my_bucket->mutex);
-#if CUSTOM_MATCH_DEBUG_VERBOSE
-                printf("matched (%d,%d) from %s \n",tag,peer, !is_recv?"prq":"umq");
-#endif
-                // free element
-                return to_memory_pool(map, elem_to_dequeue);
-            }
+            goto find_sub_bucket;
         }
     }
+
+
+
+
     // multiple hash collisions
 #ifdef COUNT_COLLISIONS
     __atomic_add_fetch(&map->num_collisions,1,__ATOMIC_ACQ_REL);
