@@ -790,10 +790,10 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 
     // branchless find the correct bucket
     // if in overflow bucket: check for initialization and then goto back
-
+    struct bucket* sub_bucket;
     find_sub_bucket:
 
-    struct bucket* sub_bucket=&my_bucket->overflow_bucket;
+    sub_bucket=&my_bucket->overflow_bucket;
     for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
 #ifdef BRANCHLESS_BUCKET_SELECTOR
         // definitely branchless
