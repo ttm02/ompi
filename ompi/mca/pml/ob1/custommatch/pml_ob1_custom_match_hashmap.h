@@ -857,6 +857,14 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 #endif
             goto find_sub_bucket;
         }
+#ifdef ADAPT_BUCKETS
+        if (my_bucket->buckets[i].bucket_head==NULL && my_bucket->overflow_bucket.bucket_head==NULL) {
+            // adapt if empty e.g. new communication phase starting
+            my_bucket->bucket_infos[i].tag = tag;
+            my_bucket->bucket_infos[i].peer = peer;
+            goto find_sub_bucket;
+        }
+#endif
     }
 
 
