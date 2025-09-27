@@ -240,7 +240,7 @@ operation *prepare_envelopes_perfect_phases(int num_phases, int msg_per_phase, i
     return values;
 }
 
-#define target_number_of_operations 1000000000
+#define target_number_of_operations 1000000
 // repeat the experiment as many times as necessary to reach targed_operations
 
 void run_experiment(const int num_phases, const int num_ops_per_phase, const operation *operations,
