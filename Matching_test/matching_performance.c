@@ -8,8 +8,9 @@
  * Simulates message-arrival and receive-posted operations
  * Usage: ./bench -n <num_ops> -t <tag_range> -r <rank_range>
  */
+#include "matching_performance.h"
+
 #include "../ompi/mca/pml/pml_constants.h"
-#include "hashmap_matching_queue_no_wildcard.h"
 
 #include <assert.h>
 #include <getopt.h>
@@ -20,37 +21,26 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "hashmap_matching_queue_no_wildcard.h"
-#include "hashmap_matching_queue_overtake_wildcard.h"
-#include "hashmap_matching_queue_with_wildcard.h"
-#include "original_matching_queue.h"
-
 #include <math.h>
 #include <string.h>
 
 // switch on mpi internal locking
 bool mca_pml_ob1_matching_protection = true;
 
-typedef struct operation {
-    int tag;
-    int rank;
-    bool is_recv;
-} operation;
+implementation_info* implementation_list_head=NULL;
+int implementation_list_size=0;
 
-typedef struct experiment_result {
-    // set by run_experiment
-    int pq_max;
-    int uq_max;
-    double pq_avg;
-    double uq_avg;
-    double time; // in milliseconds
-    double ops_per_sec;
-    // set by caller
-    char *implementation;
-    char *sequence;
-    bool any_tag;
-    bool any_source;
-} experiment_result;
+void register_implementation(const implementation_info * info)
+{
+    implementation_info* new_info = (implementation_info*)malloc(sizeof(implementation_info));
+    memcpy(new_info,info,sizeof(implementation_info));
+
+    new_info->next_implementation=implementation_list_head;
+    implementation_list_head = new_info;
+    implementation_list_size++;
+}
+
+
 
 // from https://stackoverflow.com/questions/6127503/shuffle-array-in-c
 /* Arrange the N elements of ARRAY in random order.
@@ -338,50 +328,23 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
     destroy_matching_queues(matching_queue);
 }
 
-#define NUM_IMPLEMENTATIONS 4
-
 void run_for_all_implementations(char *sequence_name, int num_phases, int num_ops_per_phase,
                                  operation *operations, bool any_tag, bool any_source,
                                  experiment_result *result)
 {
-    for (int i = 0; i < NUM_IMPLEMENTATIONS; ++i) {
+    implementation_info* impl = implementation_list_head;
+    for (int i = 0; i < implementation_list_size; ++i) {
+        assert(impl!=NULL);
         result[i].sequence = sequence_name;
         result[i].any_tag = any_tag;
         result[i].any_source = any_source;
-    }
+        result[i].implementation=impl->name;
 
-    int i = 0;
-    result[i].implementation = "default";
-    run_experiment(num_phases, num_ops_per_phase, operations, &result[i],
-                   &default_init_matching_queues, &default_destroy_matching_queues,
-                   &default_try_match_incoming, &default_try_match_receive);
-
-    ++i;
-    result[i].implementation = "hashmap_no_wildcard_support";
-    if (any_tag || any_source) {
-        // experiment not applicable
-        result[i].time = 0;
-        result[i].pq_max = 0;
-        result[i].uq_max = 0;
-        result[i].ops_per_sec = NAN;
-    } else {
         run_experiment(num_phases, num_ops_per_phase, operations, &result[i],
-                       &hashmap_no_wild_init_matching_queues,
-                       &hashmap_no_wild_destroy_matching_queues,
-                       &hashmap_no_wild_try_match_incoming, &hashmap_no_wild_try_match_receive);
+                       impl->init_matching_queues, impl->destroy_matching_queues,
+                       impl->try_match_incoming, impl->try_match_receive);
+        impl = impl->next_implementation;
     }
-    ++i;
-    result[i].implementation = "hashmap_overtaking_wildcard_support";
-    run_experiment(num_phases, num_ops_per_phase, operations, &result[i],
-                   &hashmap_overtake_wild_init_matching_queues,
-                   &hashmap_overtake_wild_destroy_matching_queues,
-                   &hashmap_overtake_wild_try_match_incoming,
-                   &hashmap_overtake_wild_try_match_receive);
-    ++i;
-    result[i].implementation = "hashmap_full_wildcard_support";
-    run_experiment(num_phases, num_ops_per_phase, operations, &result[i],
-                   &hashmap_init_matching_queues, &hashmap_destroy_matching_queues,
-                   &hashmap_try_match_incoming, &hashmap_try_match_receive);
 }
 
 // Function to write results to CSV
@@ -459,8 +422,13 @@ int main(int argc, char **argv)
 
     printf("Run with %d Threads\n", num_threads);
 
+    if (implementation_list_size==0) {
+        printf("No implementations registered\n");
+        exit(1);
+    }
+
     experiment_result *results = calloc(sizeof(experiment_result),
-                                        NUM_IMPLEMENTATIONS * repititions * NUM_SEQUENCES);
+                                        implementation_list_size * repititions * NUM_SEQUENCES);
 
     for (int i = 0; i < repititions; ++i) {
         printf("Run %d\n", i);
@@ -472,15 +440,15 @@ int main(int argc, char **argv)
         /*
                 operations = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks,
                                                                  false);
-                res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence *
-           NUM_IMPLEMENTATIONS]; run_for_all_implementations("random_no_wildcard", 1,
+                res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
+           implementation_list_size]; run_for_all_implementations("random_no_wildcard", 1,
            num_phases*num_tags_per_phase, operations, false, false, res); free(operations);
 
                 sequence++;
                 operations = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks,
                                                                  true);
-                res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence *
-           NUM_IMPLEMENTATIONS]; run_for_all_implementations("random_with_wildcard", 1,
+                res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
+           implementation_list_size]; run_for_all_implementations("random_with_wildcard", 1,
            num_phases*num_tags_per_phase, operations, true, true, res); free(operations);
                 // num_phases=1 such that there is no openmp sync
 
@@ -488,7 +456,7 @@ int main(int argc, char **argv)
                 */
         operations = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase, num_ranks,
                                                          false);
-        res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
+        res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence * implementation_list_size];
         run_for_all_implementations("random_phase_no_wildcard", num_phases, num_tags_per_phase,
                                     operations, false, false, res);
         free(operations);
@@ -497,7 +465,7 @@ int main(int argc, char **argv)
         sequence++;
         operations = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase, num_ranks,
                                                          true);
-        res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
+        res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence * implementation_list_size];
         run_for_all_implementations("random_phase_with_wildcard", num_phases, num_tags_per_phase,
                                     operations, true, true, res);
         free(operations);
@@ -505,27 +473,27 @@ int main(int argc, char **argv)
         sequence++;
         operations = prepare_envelopes_rsend_phases(num_phases, num_tags_per_phase, num_ranks,
                                                     false);
-        res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence * NUM_IMPLEMENTATIONS];
+        res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence * implementation_list_size];
         run_for_all_implementations("rsend_phase_no_wildcard", num_phases, num_tags_per_phase,
                                     operations, false, false, res);
         free(operations);
         /*
                 sequence++;
                 operations = prepare_envelopes_unexpected_phases(num_phases, num_tags_per_phase,
-           num_ranks, false); res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence *
-           NUM_IMPLEMENTATIONS]; run_for_all_implementations("unexpected_phase_no_wildcard",
+           num_ranks, false); res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
+           implementation_list_size]; run_for_all_implementations("unexpected_phase_no_wildcard",
            num_phases, num_tags_per_phase, operations, false, false, res); free(operations);
 
                 sequence++;
                 operations = prepare_envelopes_perfect_phases(num_phases, num_tags_per_phase,
-           num_ranks, false); res = &results[i * NUM_SEQUENCES * NUM_IMPLEMENTATIONS + sequence *
-           NUM_IMPLEMENTATIONS]; run_for_all_implementations("perfect_phase_no_wildcard",
+           num_ranks, false); res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
+           implementation_list_size]; run_for_all_implementations("perfect_phase_no_wildcard",
            num_phases, num_tags_per_phase, operations, false, false, res); free(operations);
             */
     }
 
     write_results_to_csv(output_file_name, results,
-                         NUM_IMPLEMENTATIONS * repititions * NUM_SEQUENCES, num_threads);
+                         implementation_list_size * repititions * NUM_SEQUENCES, num_threads);
     free(results);
 
     return 0;

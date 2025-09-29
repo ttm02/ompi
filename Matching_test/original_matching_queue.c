@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "original_matching_queue.h"
+#include "matching_performance.h"
 
 // forward declare to remove problem with include ordering when including this internal header
 struct custom_match_prq;
@@ -85,4 +85,18 @@ bool default_try_match_receive(void *matching_queues, int tag, int src, void *pa
     OB1_MATCHING_UNLOCK(&((matching_data *)matching_queues)->mutex);
 
     return retval;
+}
+
+
+__attribute__((constructor))
+void default_register_implementation()
+{
+    implementation_info info;
+    info.name="default";
+    info.init_matching_queues = &default_init_matching_queues;
+    info.destroy_matching_queues = &default_destroy_matching_queues;
+    info.try_match_incoming = &default_try_match_incoming;
+    info.try_match_receive = &default_try_match_receive;
+    info.next_implementation=NULL;
+    register_implementation(&info);
 }
