@@ -633,7 +633,6 @@ int main(int argc, char **argv)
     }
 
     write_results_to_csv(output_file_name, num_threads);
-    free(results);
 
     return 0;
 }
