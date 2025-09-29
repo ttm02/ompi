@@ -383,7 +383,7 @@ void write_results_to_csv(const char *filename, experiment_result *results, size
     fclose(fp);
 }
 
-#define NUM_SEQUENCES 2
+#define NUM_SEQUENCES 3
 
 int main(int argc, char **argv)
 {
@@ -487,13 +487,13 @@ int main(int argc, char **argv)
         run_for_all_implementations("rsend_phase_no_wildcard", num_phases, num_tags_per_phase,
                                     operations, false, false, res);
         free(operations);
-        /*
+
                 sequence++;
                 operations = prepare_envelopes_unexpected_phases(num_phases, num_tags_per_phase,
            num_ranks, false); res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
            implementation_list_size]; run_for_all_implementations("unexpected_phase_no_wildcard",
            num_phases, num_tags_per_phase, operations, false, false, res); free(operations);
-
+        /*
                 sequence++;
                 operations = prepare_envelopes_perfect_phases(num_phases, num_tags_per_phase,
            num_ranks, false); res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
