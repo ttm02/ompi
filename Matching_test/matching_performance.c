@@ -141,7 +141,7 @@ void register_implementation(const implementation_info *info)
 void register_sequence(const sequence_info *info)
 {
     sequence_info *new_info = (sequence_info *) malloc(sizeof(sequence_info));
-    memcpy(new_info, info, sizeof(implementation_info));
+    memcpy(new_info, info, sizeof(sequence_info));
 
     new_info->next = sequence_list_head;
     sequence_list_head = new_info;
