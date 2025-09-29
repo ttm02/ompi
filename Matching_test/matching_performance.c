@@ -441,23 +441,23 @@ void run_for_all_implementations(char *sequence_name, int num_phases, int num_op
     for (int i = 0; i < implementation_list_size; ++i) {
         experiment_result* result = calloc(1, sizeof(experiment_result));
         assert(impl != NULL);
-        result[i].sequence = sequence_name;
-        result[i].any_tag = any_tag;
-        result[i].any_source = any_source;
-        result[i].implementation = impl->name;
+        result->sequence = sequence_name;
+        result->any_tag = any_tag;
+        result->any_source = any_source;
+        result->implementation = impl->name;
 
         if ((any_tag || any_source) && strstr(impl->name, "no_wild") != NULL) {
             // "no_wild" is contained in implementation->name
             // experiment not applicable in implementation does not support wildcards
-            result[i].time = NAN;
-            result[i].ops_per_sec = NAN;
-            result[i].pq_avg = NAN;
-            result[i].uq_avg = NAN;
-            result[i].pq_max = 0;
-            result[i].uq_max = 0;
+            result->time = NAN;
+            result->ops_per_sec = NAN;
+            result->pq_avg = NAN;
+            result->uq_avg = NAN;
+            result->pq_max = 0;
+            result->uq_max = 0;
 
         } else {
-            run_experiment(num_phases, num_ops_per_phase, operations, &result[i],
+            run_experiment(num_phases, num_ops_per_phase, operations, result,
                            impl->init_matching_queues, impl->destroy_matching_queues,
                            impl->try_match_incoming, impl->try_match_receive);
         }
