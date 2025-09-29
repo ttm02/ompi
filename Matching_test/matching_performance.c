@@ -13,6 +13,7 @@
 #include "../ompi/mca/pml/pml_constants.h"
 
 #include <assert.h>
+#include <dirent.h>
 #include <getopt.h>
 #include <omp.h>
 #include <stdbool.h>
@@ -33,21 +34,12 @@ int implementation_list_size = 0;
 sequence_info *sequence_list_head = NULL;
 int sequence_list_size = 0;
 
-// reAD IN AN EVENT FILE
-static inline void read_events_from_file(const char *filename)
-{
+// read in an event file, create one sequence for each communicator used
+static inline void read_events_from_file(char* dirname, char *filename)
+    {
     FILE *f = fopen(filename, "rb");
     if (!f) {
         perror("fopen");
-        return;
-    }
-
-    assert(events == NULL);
-
-    events = calloc(1, sizeof(struct matching_events));
-    if (!events) {
-        fclose(f);
-        perror("calloc");
         return;
     }
 
@@ -58,15 +50,11 @@ static inline void read_events_from_file(const char *filename)
         fclose(f);
         return;
     }
-    events->num_communicators = num_comms;
 
-    // Allocate arrays
-    events->event_count = calloc(num_comms, sizeof(int));
-    events->events = calloc(num_comms, sizeof(struct matching_event *));
-    events->communicators = calloc(num_comms, sizeof(void *)); // will remain NULL
+    int32_t* event_count = calloc(num_comms, sizeof(int32_t));
 
     // Read event_count array
-    if (fread(events->event_count, sizeof(int32_t), num_comms, f) != (size_t) num_comms) {
+    if (fread(event_count, sizeof(int32_t), num_comms, f) != (size_t) num_comms) {
         perror("fread event_count");
         fclose(f);
         return;
@@ -74,26 +62,68 @@ static inline void read_events_from_file(const char *filename)
 
     // Read events for each communicator
     for (int i = 0; i < num_comms; i++) {
-        int count = events->event_count[i];
+        int count = event_count[i];
         if (count > 0) {
-            events->events[i] = malloc(sizeof(struct matching_event) * count);
-            if (!events->events[i]) {
+            operation* ops = malloc(sizeof(struct operation) * count);
+            if (!ops) {
                 perror("malloc events");
                 fclose(f);
                 return;
             }
-            if (fread(events->events[i], sizeof(struct matching_event), count, f)
+            if (fread(ops, sizeof(struct operation), count, f)
                 != (size_t) count) {
                 perror("fread events");
                 fclose(f);
                 return;
             }
-        } else {
-            events->events[i] = NULL;
+            //register
+            sequence_info sequence;
+            sequence.name= dirname;
+            sequence.num_phases=1;
+            sequence.phase_size=count;
+            sequence.ops = ops;
+            //TODO actually check for wildcards
+            sequence.has_any_source=false;
+            sequence.has_any_tag=false;
+            register_sequence(&sequence);
+        }
+    }
+    free(event_count);
+
+
+    fclose(f);
+
+}
+
+void read_events_from_dir(char *dirname)
+{
+    DIR *dir = opendir(dirname);
+    if (!dir) {
+        perror("opendir");
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        // skip "." and ".."
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        // only process files starting with "events_" and ending with ".bin"
+        if (strncmp(entry->d_name, "events_", 7) == 0) {
+            size_t len = strlen(entry->d_name);
+            if (len > 4 && strcmp(entry->d_name + len - 4, ".bin") == 0) {
+                // construct full path
+                char path[PATH_MAX];
+                snprintf(path, sizeof(path), "%s/%s", dirname, entry->d_name);
+
+                printf("Reading events from: %s\n", path);
+                read_events_from_file(dirname,path);
+            }
         }
     }
 
-    fclose(f);
+    closedir(dir);
 }
 
 void register_implementation(const implementation_info *info)
@@ -313,7 +343,7 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
                     bool (*try_match_incoming)(void *, int, int, void *),
                     bool (*try_match_receive)(void *, int, int, void *))
 {
-    const int phase_size = num_ops_per_phase * 2;
+    const int phase_size = num_ops_per_phase;
     void *matching_queue = init_matching_queues();
 
     long prq_appends = 0, prq_dequeues = 0;
@@ -514,7 +544,7 @@ int main(int argc, char **argv)
     }
 
     if (input_dir) {
-
+        read_events_from_dir(input_dir);
     } else {
         sequence_info sequence;
 
@@ -523,7 +553,7 @@ int main(int argc, char **argv)
         sequence.has_any_source = false;
         sequence.has_any_tag = false;
         sequence.num_phases = num_phases;
-        sequence.phase_size = num_tags_per_phase;
+        sequence.phase_size = num_tags_per_phase*2;
         register_sequence(&sequence);
 
         sequence.ops = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks, true);
@@ -531,7 +561,7 @@ int main(int argc, char **argv)
         sequence.has_any_source = true;
         sequence.has_any_tag = true;
         sequence.num_phases = num_phases;
-        sequence.phase_size = num_tags_per_phase;
+        sequence.phase_size = num_tags_per_phase*2;
         register_sequence(&sequence);
 
         sequence.ops = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase,
@@ -540,7 +570,7 @@ int main(int argc, char **argv)
         sequence.has_any_source = false;
         sequence.has_any_tag = false;
         sequence.num_phases = num_phases;
-        sequence.phase_size = num_tags_per_phase;
+        sequence.phase_size = num_tags_per_phase*2;
         register_sequence(&sequence);
 
         sequence.ops = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase,
@@ -549,7 +579,7 @@ int main(int argc, char **argv)
         sequence.has_any_source = true;
         sequence.has_any_tag = true;
         sequence.num_phases = num_phases;
-        sequence.phase_size = num_tags_per_phase;
+        sequence.phase_size = num_tags_per_phase*2;
         register_sequence(&sequence);
 
         sequence.ops = prepare_envelopes_rsend_phases(num_phases, num_tags_per_phase, num_ranks,
@@ -558,7 +588,7 @@ int main(int argc, char **argv)
         sequence.has_any_source = false;
         sequence.has_any_tag = false;
         sequence.num_phases = num_phases;
-        sequence.phase_size = num_tags_per_phase;
+        sequence.phase_size = num_tags_per_phase*2;
         register_sequence(&sequence);
 
         sequence.ops = prepare_envelopes_unexpected_phases(num_phases, num_tags_per_phase,
@@ -567,7 +597,7 @@ int main(int argc, char **argv)
         sequence.has_any_source = false;
         sequence.has_any_tag = false;
         sequence.num_phases = num_phases;
-        sequence.phase_size = num_tags_per_phase;
+        sequence.phase_size = num_tags_per_phase*2;
         register_sequence(&sequence);
 
         sequence.ops = prepare_envelopes_perfect_phases(num_phases, num_tags_per_phase, num_ranks,
@@ -576,7 +606,7 @@ int main(int argc, char **argv)
         sequence.has_any_source = false;
         sequence.has_any_tag = false;
         sequence.num_phases = num_phases;
-        sequence.phase_size = num_tags_per_phase;
+        sequence.phase_size = num_tags_per_phase*2;
         register_sequence(&sequence);
     }
 
