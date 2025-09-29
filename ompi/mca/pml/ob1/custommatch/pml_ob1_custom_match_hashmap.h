@@ -310,7 +310,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
     bucket_node* in_wildcard=NULL;
 
         // the wildcard bucket can only hold posted recvs as unexpected msg cannot have a wildcard
-        bucket_node* elem = map->wildcard_bucket.bucket_head;
+        bucket_node* elem = __atomic_load_n(&map->wildcard_bucket.bucket_head,__ATOMIC_RELAXED);
         while (elem!=NULL) {
             if ((elem->tag == OMPI_ANY_TAG || elem->tag == tag)
                 &&(elem->peer == OMPI_ANY_SOURCE || elem->peer == peer)) {
@@ -457,18 +457,18 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
 
 
     match_to_wildcard:
-    elem = map->wildcard_bucket.bucket_head;
+    elem = __atomic_load_n(&map->wildcard_bucket.bucket_head,__ATOMIC_RELAXED);
     prev_elem = NULL;
     while (elem != NULL) {
         if (elem== in_wildcard) {
             if (prev_elem) {
                 prev_elem->next = elem->next;
             }else {
-                map->wildcard_bucket.bucket_head = elem->next;
+                __atomic_store_n( &map->wildcard_bucket.bucket_head , elem->next,__ATOMIC_RELAXED);
             }
             if (elem->next==NULL) {
                 // removed last elem
-                map->wildcard_bucket.bucket_head= prev_elem;
+                __atomic_store_n( &map->wildcard_bucket.bucket_head , prev_elem,__ATOMIC_RELAXED);
             }
             OB1_MATCHING_UNLOCK(&map->wildcard_mutex);
             //OB1_MATCHING_UNLOCK(&my_bucket->mutex);
@@ -489,14 +489,14 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
     // traverse wildcard bucket
 
     // the wildcard bucket can only hold posted recvs as unexpected msg cannot have a wildcard
-    bucket_node* elem = map->wildcard_bucket.bucket_head;
+    bucket_node* elem = __atomic_load_n(&map->wildcard_bucket.bucket_head,__ATOMIC_RELAXED);
     bucket_node* prev = NULL;
     while (elem!=NULL) {
         if ((elem->tag == OMPI_ANY_TAG || elem->tag == tag)
             &&(elem->peer == OMPI_ANY_SOURCE || elem->peer == peer)) {
             // match: remove from list
             if (prev==NULL) {
-                map->wildcard_bucket.bucket_head=elem->next;
+                __atomic_store_n( &map->wildcard_bucket.bucket_head , elem->next,__ATOMIC_RELAXED);
             }else {
                 prev->next=elem->next;
             }
@@ -651,7 +651,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
         map->wildcard_bucket.bucket_tail->next = new_elem;
 
     }else {
-        map->wildcard_bucket.bucket_head = new_elem;
+        __atomic_store_n( &map->wildcard_bucket.bucket_head , new_elem,__ATOMIC_RELAXED);
     }
     map->wildcard_bucket.bucket_tail = new_elem;
 
@@ -748,7 +748,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
         map->wildcard_bucket.bucket_tail->next = new_elem;
 
     }else {
-        map->wildcard_bucket.bucket_head = new_elem;
+        __atomic_store_n( &map->wildcard_bucket.bucket_head , new_elem,__ATOMIC_RELAXED);
     }
     map->wildcard_bucket.bucket_tail = new_elem;
 
@@ -788,7 +788,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     //    bucket_collection *my_bucket = &map->buckets[matching_hash_func(tag, peer)];
     OB1_MATCHING_LOCK(&my_bucket->mutex);
 #ifdef WILDCARD_SUPPORT
-    if ( !is_recv && OPAL_UNLIKELY( map->wildcard_bucket.bucket_head!=NULL)) {
+    if ( !is_recv && OPAL_UNLIKELY( __atomic_load_n(&map->wildcard_bucket.bucket_head,__ATOMIC_RELAXED)!=NULL)) {
         bucket_node *elem_to_dequeue  = try_match_from_wildcard_prq(map,tag,peer,to_fill);
         if (elem_to_dequeue) {
             OB1_MATCHING_UNLOCK(&my_bucket->mutex);
