@@ -24,7 +24,7 @@ struct matching_events {
 
 extern struct matching_events* events;
 
-void init_events_filename()
+static void init_events_filename()
 {
     pid_t pid = getpid();
 
@@ -40,7 +40,7 @@ void init_events_filename()
     }
 }
 
-inline void write_events_to_file()
+static inline void write_events_to_file()
 {
     if (events == NULL || events->num_communicators == 0) {
         //fprintf(stderr, "No events to write\n");
@@ -76,7 +76,7 @@ inline void write_events_to_file()
 }
 
 
-inline void add_event(void* communicator, int tag,int peer,int is_recv)
+static inline void add_event(void* communicator, int tag,int peer,int is_recv)
 {
     if (events==NULL) {
         events = calloc(sizeof(struct matching_events),1);
@@ -106,6 +106,7 @@ inline void add_event(void* communicator, int tag,int peer,int is_recv)
     int event_idx = events->event_count[communicator_idx];
 
     events->events[communicator_idx] = realloc(events->events[communicator_idx],sizeof(struct matching_event)*(event_idx+1));
+    events->event_count[communicator_idx]++;
     events->events[communicator_idx][event_idx].tag = tag;
     events->events[communicator_idx][event_idx].peer = peer;
     events->events[communicator_idx][event_idx].is_recv = is_recv;
@@ -114,17 +115,17 @@ inline void add_event(void* communicator, int tag,int peer,int is_recv)
     write_events_to_file();
 }
 
-inline void add_recv_event(void* communicator, int tag,int peer)
+static inline void add_recv_event(void* communicator, int tag,int peer)
 {
     add_event(communicator,tag,peer,1);
 }
 
-inline void add_msg_arrive_event(void* communicator, int tag,int peer)
+static inline void add_msg_arrive_event(void* communicator, int tag,int peer)
 {
     add_event(communicator,tag,peer,0);
 }
 
-inline void read_events_from_file(const char *filename)
+static inline void read_events_from_file(const char *filename)
 {
     FILE *f = fopen(filename, "rb");
     if (!f) {
