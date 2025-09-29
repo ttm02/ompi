@@ -349,7 +349,8 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
     long prq_appends = 0, prq_dequeues = 0;
     long umq_appends = 0, umq_dequeues = 0;
     int pq_size = 0, uq_size = 0;
-    long average_prq_size = 0, average_umq_size = 0;
+    unsigned long average_prq_size = 0, average_umq_size = 0;
+    bool average_overflow=false;
     int pq_max = 0, uq_max = 0;
 
     struct timespec t0, t1;
