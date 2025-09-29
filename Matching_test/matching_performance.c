@@ -1,8 +1,5 @@
-// compilation: gcc -g -O2 -I../ompi/include/ -I../opal/include/ -I..
-// -I../3rd-party/openpmix/include matching_performance.c original_matching_queue.c
-// hashmap_matching_queue_with_wildcard.c hashmap_matching_queue_no_wildcard.c
-// hashmap_matching_queue_overtake_wildcard.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread
-// -fopenmp
+// compilation: gcc -g -O3 -march=native -mtune=native -fopenmp -I../ompi/include/ -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c original_matching_queue.c hashmap_matching_queue_*.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread
+
 /*
  * PRQ/UMQ Performance Test
  * Simulates message-arrival and receive-posted operations
@@ -340,9 +337,21 @@ void run_for_all_implementations(char *sequence_name, int num_phases, int num_op
         result[i].any_source = any_source;
         result[i].implementation=impl->name;
 
-        run_experiment(num_phases, num_ops_per_phase, operations, &result[i],
-                       impl->init_matching_queues, impl->destroy_matching_queues,
-                       impl->try_match_incoming, impl->try_match_receive);
+        if ((any_tag || any_source) && strstr(impl->name, "no_wild") != NULL) {
+            // "no_wild" is contained in implementation->name
+            // experiment not applicable in implementation does not support wildcards
+            result[i].time = NAN;
+            result[i].ops_per_sec = NAN;
+            result[i].pq_avg=NAN;
+            result[i].uq_avg=NAN;
+            result[i].pq_max=0;
+            result[i].uq_max=0;
+
+        }else {
+            run_experiment(num_phases, num_ops_per_phase, operations, &result[i],
+                           impl->init_matching_queues, impl->destroy_matching_queues,
+                           impl->try_match_incoming, impl->try_match_receive);
+        }
         impl = impl->next_implementation;
     }
 }
@@ -437,6 +446,7 @@ int main(int argc, char **argv)
         operation *operations;
         experiment_result *res;
 
+        //TODO one could similarly use a register_sequence design
         /*
                 operations = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks,
                                                                  false);
