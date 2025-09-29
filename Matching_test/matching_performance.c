@@ -34,6 +34,8 @@ int implementation_list_size = 0;
 sequence_info *sequence_list_head = NULL;
 int sequence_list_size = 0;
 
+experiment_result* experiment_result_list_head=NULL;
+
 // read in an event file, create one sequence for each communicator used
 static inline void read_events_from_file(char* dirname, char *filename)
     {
@@ -432,11 +434,12 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
 }
 
 void run_for_all_implementations(char *sequence_name, int num_phases, int num_ops_per_phase,
-                                 operation *operations, bool any_tag, bool any_source,
-                                 experiment_result *result)
+                                 operation *operations, bool any_tag, bool any_source)
 {
+
     implementation_info *impl = implementation_list_head;
     for (int i = 0; i < implementation_list_size; ++i) {
+        experiment_result* result = calloc(1, sizeof(experiment_result));
         assert(impl != NULL);
         result[i].sequence = sequence_name;
         result[i].any_tag = any_tag;
@@ -458,12 +461,14 @@ void run_for_all_implementations(char *sequence_name, int num_phases, int num_op
                            impl->init_matching_queues, impl->destroy_matching_queues,
                            impl->try_match_incoming, impl->try_match_receive);
         }
+        result->next=experiment_result_list_head;
+        experiment_result_list_head = result;
         impl = impl->next_implementation;
     }
 }
 
 // Function to write results to CSV
-void write_results_to_csv(const char *filename, experiment_result *results, size_t count,
+void write_results_to_csv(const char *filename,
                           int num_threads)
 {
     printf("Write results to %s\n", filename);
@@ -478,12 +483,16 @@ void write_results_to_csv(const char *filename, experiment_result *results, size
                 "avg,time,ops_per_sec\n");
 
     // Write each row
-    for (size_t i = 0; i < count; i++) {
+    experiment_result* result = experiment_result_list_head;
+    while (result!=NULL) {
         fprintf(fp, "%d,%s,%s,%d,%d,%d,%d,%.2f,%.2f,%.6f,%.6f\n", num_threads,
-                results[i].implementation ? results[i].implementation : "",
-                results[i].sequence ? results[i].sequence : "", results[i].any_tag ? 1 : 0,
-                results[i].any_source ? 1 : 0, results[i].pq_max, results[i].uq_max,
-                results->pq_avg, results->uq_avg, results[i].time, results[i].ops_per_sec);
+                result->implementation ? result->implementation : "",
+                result->sequence ? result->sequence : "", result->any_tag ? 1 : 0,
+                result->any_source ? 1 : 0, result->pq_max, result->uq_max,
+                result->pq_avg, result->uq_avg, result->time, result->ops_per_sec);
+        experiment_result* old_result=result;
+        result = old_result->next;
+        free(old_result);
     }
 
     fclose(fp);
@@ -611,27 +620,19 @@ int main(int argc, char **argv)
         register_sequence(&sequence);
     }
 
-    experiment_result *results = calloc(sizeof(experiment_result), implementation_list_size
-                                                                       * repititions
-                                                                       * sequence_list_size);
-
     for (int i = 0; i < repititions; ++i) {
         printf("Run %d\n", i);
         sequence_info *sequence = sequence_list_head;
         for (int seq = 0; seq < sequence_list_size; seq++) {
             assert(sequence != NULL);
-            // index the result
-            experiment_result *res = &results[i * sequence_list_size * implementation_list_size
-                                              + seq * implementation_list_size];
             run_for_all_implementations(sequence->name, sequence->num_phases, sequence->phase_size,
                                         sequence->ops, sequence->has_any_tag,
-                                        sequence->has_any_source, res);
+                                        sequence->has_any_source);
             sequence = sequence->next;
         }
     }
 
-    write_results_to_csv(output_file_name, results,
-                         implementation_list_size * repititions * sequence_list_size, num_threads);
+    write_results_to_csv(output_file_name, num_threads);
     free(results);
 
     return 0;

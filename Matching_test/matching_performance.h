@@ -27,6 +27,7 @@ typedef struct experiment_result {
     char *sequence;
     bool any_tag;
     bool any_source;
+    struct experiment_result* next;
 } experiment_result;
 
 typedef struct sequence_info {
