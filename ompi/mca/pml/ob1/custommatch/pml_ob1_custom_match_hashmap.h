@@ -38,8 +38,13 @@
 #define LEVEL1_DCACHE_LINESIZE 64
 //getconf LEVEL1_DCACHE_LINESIZE
 
+#ifndef NUM_BUCKETS
 #define NUM_BUCKETS           16
-#define NUM_QUEEUS_IN_BUCKETS 2
+#endif
+
+#ifndef NUM_QUEUES_IN_BUCKETS
+#define NUM_QUEUES_IN_BUCKETS 2
+#endif
 // the hash function used is expected to have one collision (peer+tag == tag+peer)
 
 #define COUNT_COLLISIONS
@@ -85,10 +90,10 @@ struct bucket {
 
 typedef struct bucket_collection {
     //  efficient access when no collisions are present
-    struct bucket_info bucket_infos[NUM_QUEEUS_IN_BUCKETS];
+    struct bucket_info bucket_infos[NUM_QUEUES_IN_BUCKETS];
     //TODO make sure the cache line ends here??
     opal_mutex_t mutex; // if locking is necessary
-    struct bucket buckets[NUM_QUEEUS_IN_BUCKETS];
+    struct bucket buckets[NUM_QUEUES_IN_BUCKETS];
     // other bucket used on more collisions: need traversal and lock
     struct bucket overflow_bucket;
     //TODO align to the cache line??
@@ -167,7 +172,7 @@ static inline void custom_match_prq_cancel(hashmap* map, void* payload)
     for (int i = 0; i < NUM_BUCKETS; ++i) {
         bucket_collection *my_bucket = &map->buckets[i];
         OB1_MATCHING_LOCK(&my_bucket->mutex);
-        for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
+        for (int j = 0; j < NUM_QUEUES_IN_BUCKETS; ++j) {
             bucket_node* prev_elem=NULL;
             bucket_node* elem = my_bucket->buckets[j].bucket_head;
             while (elem!=NULL) {
@@ -309,7 +314,7 @@ static inline void *try_match_from_wildcard_prq(hashmap *map, int tag, int peer,
         }
 
     // in normal bucket
-    for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
+    for (int i = 0; i < NUM_QUEUES_IN_BUCKETS; ++i) {
         if (OPAL_UNLIKELY(my_bucket->bucket_infos[i].tag == -1)) {
             // initialize on first use
             my_bucket->bucket_infos[i].tag = tag;
@@ -522,7 +527,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
 
     for (int i = 0; i < NUM_BUCKETS; ++i) {
         bucket_collection *my_bucket = &map->buckets[i];
-        for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
+        for (int j = 0; j < NUM_QUEUES_IN_BUCKETS; ++j) {
             if (!my_bucket->buckets[j].is_recv) {
                 // if bucket holds UMQ
                 bucket_node* prev_elem=NULL;
@@ -567,7 +572,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
             if (current_oldest) {
                 // pthread does not allow to downgrade to readlock when having the writelock
                 // this could be useful here, as we only need the bucket lock and rdlock for the following
-                for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
+                for (int j = 0; j < NUM_QUEUES_IN_BUCKETS; ++j) {
                     if (!oldest_bucket->buckets[j].is_recv) {
                         // if bucket holds UMQ
                         bucket_node* prev_elem=NULL;
@@ -666,7 +671,7 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
     // traverse all buckets to find matching
     for (int i = 0; i < NUM_BUCKETS; ++i) {
         bucket_collection *my_bucket = &map->buckets[i];
-        for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
+        for (int j = 0; j < NUM_QUEUES_IN_BUCKETS; ++j) {
             if (!my_bucket->buckets[j].is_recv){// if bucket holds UMQ
                 bucket_node* prev_elem=NULL;
                 bucket_node* elem = my_bucket->buckets[j].bucket_head;
@@ -796,7 +801,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
     find_sub_bucket:
 
     sub_bucket=&my_bucket->overflow_bucket;
-    for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
+    for (int i = 0; i < NUM_QUEUES_IN_BUCKETS; ++i) {
 #ifdef BRANCHLESS_BUCKET_SELECTOR
         // definitely branchless
         int condition = (my_bucket->bucket_infos[i].tag == tag) & (my_bucket->bucket_infos[i].peer == peer);
@@ -808,7 +813,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
         sub_bucket = (struct bucket*)((new_ptr & mask) | (old_ptr & ~mask));
 #else
         // possibly branchless
-        sub_bucket= my_bucket->bucket_infos[i].tag == tag & my_bucket->bucket_infos[i].peer == peer ? &my_bucket->buckets[i]: sub_bucket;
+        sub_bucket= (my_bucket->bucket_infos[i].tag == tag & my_bucket->bucket_infos[i].peer == peer) ? &my_bucket->buckets[i]: sub_bucket;
 #endif
 
     }
@@ -847,7 +852,7 @@ static inline void *get_match_or_insert(hashmap *map, int tag, int peer, void***
 
     // check if all buckes where initialized
     //TODO at this point one can also update the direct buckets if necessary
-    for (int i = 0; i < NUM_QUEEUS_IN_BUCKETS; ++i) {
+    for (int i = 0; i < NUM_QUEUES_IN_BUCKETS; ++i) {
         if (OPAL_UNLIKELY(my_bucket->bucket_infos[i].tag == -1)) {
             // initialize on first use
             my_bucket->bucket_infos[i].tag = tag;
@@ -967,7 +972,7 @@ static inline hashmap *match_map_init(void)
     OBJ_CONSTRUCT(&map->mutex, opal_mutex_t);
     for (int i = 0; i < NUM_BUCKETS; ++i) {
         OBJ_CONSTRUCT(&map->buckets[i].mutex, opal_mutex_t);
-        for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
+        for (int j = 0; j < NUM_QUEUES_IN_BUCKETS; ++j) {
             map->buckets[i].bucket_infos[j].tag = -1;
             map->buckets[i].bucket_infos[j].peer = -1;
         }
@@ -987,7 +992,7 @@ static inline void match_map_destroy(hashmap *map)
     OBJ_DESTRUCT(&map->mutex);
     for (int i = 0; i < NUM_BUCKETS; ++i) {
         OBJ_DESTRUCT(&map->buckets[i].mutex);
-        for (int j = 0; j < NUM_QUEEUS_IN_BUCKETS; ++j) {
+        for (int j = 0; j < NUM_QUEUES_IN_BUCKETS; ++j) {
             bucket_node *elem = map->buckets[i].buckets[j].bucket_head;
             while (elem != NULL) {
                 bucket_node *next_elem = elem->next;
