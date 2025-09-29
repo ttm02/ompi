@@ -10,12 +10,13 @@
 #define NUM_BUCKETS 16
 static inline int matching_hash_func(int tag, int peer)
 {
-    int mask = 0xF;
-    return (tag ^ peer) & mask;
+    int maskA = 0b0101;
+    int maskB = 0b1010;
+    return (tag &maskB) & (peer & maskA);
 }
 
-#define IMPLEMENTATION_NAME_STRING "hashmap_no_wild_one_bin_xor"
-#define IMPLEMENTATION_NAME_FUNCTION_PREFIX hashmap_no_wild_one_bin_xor
+#define IMPLEMENTATION_NAME_STRING "hashmap_no_wild_one_bin_mix2"
+#define IMPLEMENTATION_NAME_FUNCTION_PREFIX hashmap_no_wild_one_bin_mix2
 
 // include the actual implementation
 #include "hashmap_matching_queue_impl.h"
