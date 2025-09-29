@@ -3,15 +3,15 @@
 
 #include <assert.h>
 #include <stdbool.h>
-
+#include <stdint.h>
 
 // switch on mpi internal locking
 extern bool mca_pml_ob1_matching_protection;
 
 typedef struct operation {
-    int tag;
-    int rank;
-    bool is_recv;
+    int32_t tag;
+    int32_t rank;
+    int32_t is_recv;
 } operation;
 
 typedef struct experiment_result {
@@ -28,6 +28,19 @@ typedef struct experiment_result {
     bool any_tag;
     bool any_source;
 } experiment_result;
+
+typedef struct sequence_info {
+    char* name;
+    int num_phases;
+    int phase_size; // after each pase, all threads will synchronize
+    // num operations= num_phases*phase_size
+    operation* ops;
+    bool has_any_tag;
+    bool has_any_source;
+    struct sequence_info* next;
+} sequence_info;
+
+void register_sequence(const sequence_info * info);
 
 typedef struct implementation_info {
     char* name;

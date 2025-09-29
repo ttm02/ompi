@@ -1,4 +1,7 @@
-// compilation: gcc -g -O3 -march=native -mtune=native -fopenmp -I../ompi/include/ -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c original_matching_queue.c hashmap_matching_queue_*.c -Wno-format ../opal/.libs/libopen-pal.so -lpthread
+// compilation: gcc -g -O3 -march=native -mtune=native -fopenmp -I../ompi/include/
+// -I../opal/include/ -I.. -I../3rd-party/openpmix/include matching_performance.c
+// original_matching_queue.c hashmap_matching_queue_*.c -Wno-format ../opal/.libs/libopen-pal.so
+// -lpthread
 
 /*
  * PRQ/UMQ Performance Test
@@ -24,20 +27,94 @@
 // switch on mpi internal locking
 bool mca_pml_ob1_matching_protection = true;
 
-implementation_info* implementation_list_head=NULL;
-int implementation_list_size=0;
+implementation_info *implementation_list_head = NULL;
+int implementation_list_size = 0;
 
-void register_implementation(const implementation_info * info)
+sequence_info *sequence_list_head = NULL;
+int sequence_list_size = 0;
+
+// reAD IN AN EVENT FILE
+static inline void read_events_from_file(const char *filename)
 {
-    implementation_info* new_info = (implementation_info*)malloc(sizeof(implementation_info));
-    memcpy(new_info,info,sizeof(implementation_info));
+    FILE *f = fopen(filename, "rb");
+    if (!f) {
+        perror("fopen");
+        return;
+    }
 
-    new_info->next_implementation=implementation_list_head;
+    assert(events == NULL);
+
+    events = calloc(1, sizeof(struct matching_events));
+    if (!events) {
+        fclose(f);
+        perror("calloc");
+        return;
+    }
+
+    // Read num_communicators
+    int32_t num_comms;
+    if (fread(&num_comms, sizeof(int32_t), 1, f) != 1) {
+        perror("fread num_communicators");
+        fclose(f);
+        return;
+    }
+    events->num_communicators = num_comms;
+
+    // Allocate arrays
+    events->event_count = calloc(num_comms, sizeof(int));
+    events->events = calloc(num_comms, sizeof(struct matching_event *));
+    events->communicators = calloc(num_comms, sizeof(void *)); // will remain NULL
+
+    // Read event_count array
+    if (fread(events->event_count, sizeof(int32_t), num_comms, f) != (size_t) num_comms) {
+        perror("fread event_count");
+        fclose(f);
+        return;
+    }
+
+    // Read events for each communicator
+    for (int i = 0; i < num_comms; i++) {
+        int count = events->event_count[i];
+        if (count > 0) {
+            events->events[i] = malloc(sizeof(struct matching_event) * count);
+            if (!events->events[i]) {
+                perror("malloc events");
+                fclose(f);
+                return;
+            }
+            if (fread(events->events[i], sizeof(struct matching_event), count, f)
+                != (size_t) count) {
+                perror("fread events");
+                fclose(f);
+                return;
+            }
+        } else {
+            events->events[i] = NULL;
+        }
+    }
+
+    fclose(f);
+}
+
+void register_implementation(const implementation_info *info)
+{
+    implementation_info *new_info = (implementation_info *) malloc(sizeof(implementation_info));
+    memcpy(new_info, info, sizeof(implementation_info));
+
+    new_info->next_implementation = implementation_list_head;
     implementation_list_head = new_info;
     implementation_list_size++;
 }
 
+void register_sequence(const sequence_info *info)
+{
+    sequence_info *new_info = (sequence_info *) malloc(sizeof(sequence_info));
+    memcpy(new_info, info, sizeof(implementation_info));
 
+    new_info->next = sequence_list_head;
+    sequence_list_head = new_info;
+    sequence_list_size++;
+}
 
 // from https://stackoverflow.com/questions/6127503/shuffle-array-in-c
 /* Arrange the N elements of ARRAY in random order.
@@ -230,7 +307,6 @@ operation *prepare_envelopes_perfect_phases(int num_phases, int msg_per_phase, i
     return values;
 }
 
-
 void run_experiment(const int num_phases, const int num_ops_per_phase, const operation *operations,
                     experiment_result *result, void *(*init_matching_queues)(),
                     void (*destroy_matching_queues)(void *),
@@ -248,60 +324,59 @@ void run_experiment(const int num_phases, const int num_ops_per_phase, const ope
 
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
-#pragma omp parallel reduction(+ : prq_appends, prq_dequeues, umq_appends, umq_dequeues, average_prq_size, average_umq_size) \
-    firstprivate(pq_size, uq_size)                                                       \
-    reduction(max : pq_max, uq_max)
+#pragma omp parallel reduction(+ : prq_appends, prq_dequeues, umq_appends, umq_dequeues, \
+                                   average_prq_size, average_umq_size)                   \
+    firstprivate(pq_size, uq_size) reduction(max : pq_max, uq_max)
     {
-            for (int n = 0; n < num_phases; ++n) {
+        for (int n = 0; n < num_phases; ++n) {
 #pragma omp for schedule(static, 1)
-                for (long i = 0; i < phase_size; ++i) {
-                    bool is_recv = operations[n * phase_size + i].is_recv;
-                    int src = operations[n * phase_size + i].rank;
-                    int tag = operations[n * phase_size + i].tag;
+            for (long i = 0; i < phase_size; ++i) {
+                bool is_recv = operations[n * phase_size + i].is_recv;
+                int src = operations[n * phase_size + i].rank;
+                int tag = operations[n * phase_size + i].tag;
 
-                    void *payload = (void *) (uintptr_t) i + 1; // not null palyoad
-                    if (!is_recv) {
-                        // "problem" in the benchmark, for short queue sizes, this branch is
-                        // unpredictable e.g. the corresponding recv is issued fast this means that
-                        // the runtime for smaller queue sizes is larger due to branch
-                        // missprediction as the benchmakr is also about the number of brnahces in
-                        // the matching impl, this does show in resuilt data as the exact same
-                        // sequence is used, it does not inhibit comparability the effect goes away
-                        // on longer sequences
+                void *payload = (void *) (uintptr_t) i + 1; // not null palyoad
+                if (!is_recv) {
+                    // "problem" in the benchmark, for short queue sizes, this branch is
+                    // unpredictable e.g. the corresponding recv is issued fast this means that
+                    // the runtime for smaller queue sizes is larger due to branch
+                    // missprediction as the benchmakr is also about the number of brnahces in
+                    // the matching impl, this does show in resuilt data as the exact same
+                    // sequence is used, it does not inhibit comparability the effect goes away
+                    // on longer sequences
 
-                        // Operation 1: message arrival
-                        // search posted receives (PRQ)
-                        if (try_match_incoming(matching_queue, tag, src, payload)) {
-                            --pq_size;
-                            prq_dequeues++;
-                        } else {
-                            umq_appends++;
-                            ++uq_size;
-                            if (uq_size > uq_max) {
-                                uq_max = uq_size;
-                            }
-                        }
+                    // Operation 1: message arrival
+                    // search posted receives (PRQ)
+                    if (try_match_incoming(matching_queue, tag, src, payload)) {
+                        --pq_size;
+                        prq_dequeues++;
                     } else {
-                        // Operation 2: receive posted
-                        // search unexpected messages (UMQ)
-
-                        if (try_match_receive(matching_queue, tag, src, payload)) {
-                            // matched => do nothing else
-                            umq_dequeues++;
-                            uq_size--;
-                        } else {
-                            // not found => post receive into PRQ
-                            prq_appends++;
-                            pq_size++;
-                            if (pq_size > pq_max)
-                                pq_max = pq_size;
+                        umq_appends++;
+                        ++uq_size;
+                        if (uq_size > uq_max) {
+                            uq_max = uq_size;
                         }
                     }
-                    average_prq_size += pq_size;
-                    average_umq_size += uq_size;
-                } // implicit OpenMP barrier
-            }
+                } else {
+                    // Operation 2: receive posted
+                    // search unexpected messages (UMQ)
 
+                    if (try_match_receive(matching_queue, tag, src, payload)) {
+                        // matched => do nothing else
+                        umq_dequeues++;
+                        uq_size--;
+                    } else {
+                        // not found => post receive into PRQ
+                        prq_appends++;
+                        pq_size++;
+                        if (pq_size > pq_max)
+                            pq_max = pq_size;
+                    }
+                }
+                average_prq_size += pq_size;
+                average_umq_size += uq_size;
+            } // implicit OpenMP barrier
+        }
     }
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
@@ -329,25 +404,25 @@ void run_for_all_implementations(char *sequence_name, int num_phases, int num_op
                                  operation *operations, bool any_tag, bool any_source,
                                  experiment_result *result)
 {
-    implementation_info* impl = implementation_list_head;
+    implementation_info *impl = implementation_list_head;
     for (int i = 0; i < implementation_list_size; ++i) {
-        assert(impl!=NULL);
+        assert(impl != NULL);
         result[i].sequence = sequence_name;
         result[i].any_tag = any_tag;
         result[i].any_source = any_source;
-        result[i].implementation=impl->name;
+        result[i].implementation = impl->name;
 
         if ((any_tag || any_source) && strstr(impl->name, "no_wild") != NULL) {
             // "no_wild" is contained in implementation->name
             // experiment not applicable in implementation does not support wildcards
             result[i].time = NAN;
             result[i].ops_per_sec = NAN;
-            result[i].pq_avg=NAN;
-            result[i].uq_avg=NAN;
-            result[i].pq_max=0;
-            result[i].uq_max=0;
+            result[i].pq_avg = NAN;
+            result[i].uq_avg = NAN;
+            result[i].pq_max = 0;
+            result[i].uq_max = 0;
 
-        }else {
+        } else {
             run_experiment(num_phases, num_ops_per_phase, operations, &result[i],
                            impl->init_matching_queues, impl->destroy_matching_queues,
                            impl->try_match_incoming, impl->try_match_receive);
@@ -383,8 +458,6 @@ void write_results_to_csv(const char *filename, experiment_result *results, size
     fclose(fp);
 }
 
-#define NUM_SEQUENCES 7
-
 int main(int argc, char **argv)
 {
 
@@ -394,7 +467,8 @@ int main(int argc, char **argv)
     int num_ranks = 20;
     int repititions = 3;
     char *output_file_name = "experiment_log";
-    while ((opt = getopt(argc, argv, "n:t:p:r:o:")) != -1) {
+    char *input_dir = NULL;
+    while ((opt = getopt(argc, argv, "n:t:p:r:o:i:")) != -1) {
         switch (opt) {
         case 'n':
             num_phases = atol(optarg);
@@ -410,6 +484,9 @@ int main(int argc, char **argv)
             break;
         case 'o':
             output_file_name = optarg;
+            break;
+        case 'i':
+            input_dir = optarg;
             break;
         default:
             printf("Unknown option: %c\n", opt);
@@ -431,79 +508,99 @@ int main(int argc, char **argv)
 
     printf("Run with %d Threads\n", num_threads);
 
-    if (implementation_list_size==0) {
+    if (implementation_list_size == 0) {
         printf("No implementations registered\n");
         exit(1);
     }
 
-    experiment_result *results = calloc(sizeof(experiment_result),
-                                        implementation_list_size * repititions * NUM_SEQUENCES);
+    if (input_dir) {
+
+    } else {
+        sequence_info sequence;
+
+        sequence.ops = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks, false);
+        sequence.name = "random_no_wildcard";
+        sequence.has_any_source = false;
+        sequence.has_any_tag = false;
+        sequence.num_phases = num_phases;
+        sequence.phase_size = num_tags_per_phase;
+        register_sequence(&sequence);
+
+        sequence.ops = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks, true);
+        sequence.name = "random_with_wildcard";
+        sequence.has_any_source = true;
+        sequence.has_any_tag = true;
+        sequence.num_phases = num_phases;
+        sequence.phase_size = num_tags_per_phase;
+        register_sequence(&sequence);
+
+        sequence.ops = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase,
+                                                           num_ranks, false);
+        sequence.name = "random_phase_no_wildcard";
+        sequence.has_any_source = false;
+        sequence.has_any_tag = false;
+        sequence.num_phases = num_phases;
+        sequence.phase_size = num_tags_per_phase;
+        register_sequence(&sequence);
+
+        sequence.ops = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase,
+                                                           num_ranks, true);
+        sequence.name = "random_phase_with_wildcard";
+        sequence.has_any_source = true;
+        sequence.has_any_tag = true;
+        sequence.num_phases = num_phases;
+        sequence.phase_size = num_tags_per_phase;
+        register_sequence(&sequence);
+
+        sequence.ops = prepare_envelopes_rsend_phases(num_phases, num_tags_per_phase, num_ranks,
+                                                      false);
+        sequence.name = "rsend_phase_no_wildcard";
+        sequence.has_any_source = false;
+        sequence.has_any_tag = false;
+        sequence.num_phases = num_phases;
+        sequence.phase_size = num_tags_per_phase;
+        register_sequence(&sequence);
+
+        sequence.ops = prepare_envelopes_unexpected_phases(num_phases, num_tags_per_phase,
+                                                           num_ranks, false);
+        sequence.name = "unexpected_phase_no_wildcard";
+        sequence.has_any_source = false;
+        sequence.has_any_tag = false;
+        sequence.num_phases = num_phases;
+        sequence.phase_size = num_tags_per_phase;
+        register_sequence(&sequence);
+
+        sequence.ops = prepare_envelopes_perfect_phases(num_phases, num_tags_per_phase, num_ranks,
+                                                        false);
+        sequence.name = "perfect_phase_no_wildcard";
+        sequence.has_any_source = false;
+        sequence.has_any_tag = false;
+        sequence.num_phases = num_phases;
+        sequence.phase_size = num_tags_per_phase;
+        register_sequence(&sequence);
+    }
+
+    experiment_result *results = calloc(sizeof(experiment_result), implementation_list_size
+                                                                       * repititions
+                                                                       * sequence_list_size);
 
     for (int i = 0; i < repititions; ++i) {
         printf("Run %d\n", i);
-        // fully random
-        int sequence = 0;
-        operation *operations;
-        experiment_result *res;
-
-        //TODO one could similarly use a register_sequence design
-
-                operations = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks,
-                                                                 false);
-                res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
-           implementation_list_size]; run_for_all_implementations("random_no_wildcard", 1,
-           num_phases*num_tags_per_phase, operations, false, false, res); free(operations);
-
-                sequence++;
-                operations = prepare_envelopes_random(num_phases, num_tags_per_phase, num_ranks,
-                                                                 true);
-                res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
-           implementation_list_size]; run_for_all_implementations("random_with_wildcard", 1,
-           num_phases*num_tags_per_phase, operations, true, true, res); free(operations);
-                // num_phases=1 such that there is no openmp sync
-
-                sequence++;
-
-        operations = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase, num_ranks,
-                                                         false);
-        res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence * implementation_list_size];
-        run_for_all_implementations("random_phase_no_wildcard", num_phases, num_tags_per_phase,
-                                    operations, false, false, res);
-        free(operations);
-
-
-        sequence++;
-        operations = prepare_envelopes_randomized_phases(num_phases, num_tags_per_phase, num_ranks,
-                                                         true);
-        res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence * implementation_list_size];
-        run_for_all_implementations("random_phase_with_wildcard", num_phases, num_tags_per_phase,
-                                    operations, true, true, res);
-        free(operations);
-
-        sequence++;
-        operations = prepare_envelopes_rsend_phases(num_phases, num_tags_per_phase, num_ranks,
-                                                    false);
-        res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence * implementation_list_size];
-        run_for_all_implementations("rsend_phase_no_wildcard", num_phases, num_tags_per_phase,
-                                    operations, false, false, res);
-        free(operations);
-
-                sequence++;
-                operations = prepare_envelopes_unexpected_phases(num_phases, num_tags_per_phase,
-           num_ranks, false); res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
-           implementation_list_size]; run_for_all_implementations("unexpected_phase_no_wildcard",
-           num_phases, num_tags_per_phase, operations, false, false, res); free(operations);
-
-                sequence++;
-                operations = prepare_envelopes_perfect_phases(num_phases, num_tags_per_phase,
-           num_ranks, false); res = &results[i * NUM_SEQUENCES * implementation_list_size + sequence *
-           implementation_list_size]; run_for_all_implementations("perfect_phase_no_wildcard",
-           num_phases, num_tags_per_phase, operations, false, false, res); free(operations);
-
+        sequence_info *sequence = sequence_list_head;
+        for (int seq = 0; seq < sequence_list_size; seq++) {
+            assert(sequence != NULL);
+            // index the result
+            experiment_result *res = &results[i * sequence_list_size * implementation_list_size
+                                              + seq * implementation_list_size];
+            run_for_all_implementations(sequence->name, sequence->num_phases, sequence->phase_size,
+                                        sequence->ops, sequence->has_any_tag,
+                                        sequence->has_any_source, res);
+            sequence = sequence->next;
+        }
     }
 
     write_results_to_csv(output_file_name, results,
-                         implementation_list_size * repititions * NUM_SEQUENCES, num_threads);
+                         implementation_list_size * repititions * sequence_list_size, num_threads);
     free(results);
 
     return 0;
