@@ -522,10 +522,10 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
 {
 
     //lock ALL buckets
-    OB1_MATCHING_LOCK(&map->wildcard_mutex);
     for (int i =0;i<NUM_BUCKETS;++i) {
         OB1_MATCHING_LOCK(&map->buckets[i].mutex);
     }
+    OB1_MATCHING_LOCK(&map->wildcard_mutex);
 
     bucket_node* current_oldest=NULL;
     bucket_collection* oldest_bucket=NULL;
@@ -668,10 +668,10 @@ static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void***
 static inline void *match_with_wildcard(hashmap *map, int tag, int peer, void*** to_fill)
 {
     //lock ALL buckets
-    OB1_MATCHING_LOCK(&map->wildcard_mutex);
     for (int i =0;i<NUM_BUCKETS;++i) {
         OB1_MATCHING_LOCK(&map->buckets[i].mutex);
     }
+    OB1_MATCHING_LOCK(&map->wildcard_mutex);
 
     bucket_node* current_oldest=NULL;
     bucket_collection* oldest_bucket=NULL;
