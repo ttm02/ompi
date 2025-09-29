@@ -123,12 +123,14 @@ typedef hashmap custom_match_prq;
 
 // simple hash function should suffice
 // TODO evaluate other hash functions?
+#ifndef MATCHING_HASH_FUNC_IS_PROVIDED
 static inline int matching_hash_func(int tag, int peer)
 {
     int mask = 0x7FFFFFFF; // only sign bit not set
     // tag may be negative on some internal communication
     return ((tag& mask) + peer) % NUM_BUCKETS;
 }
+#endif
 
 static inline void* to_memory_pool(hashmap *map, bucket_node *node)
 {
