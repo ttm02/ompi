@@ -47,9 +47,8 @@
 #endif
 // the hash function used is expected to have one collision (peer+tag == tag+peer)
 
-#define COUNT_COLLISIONS
-
 #ifndef OUTSIDE_CONFIGURATION
+#define COUNT_COLLISIONS
 #define WILDCARD_SUPPORT
 #define WILDCARD_NO_OVERTAKE_SUPPORT
 #define BRANCHLESS_BUCKET_SELECTOR
