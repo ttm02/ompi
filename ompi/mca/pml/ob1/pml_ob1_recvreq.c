@@ -40,11 +40,13 @@
 #include "ompi/mca/bml/bml.h"
 #include "pml_ob1_comm.h"
 #include "pml_ob1_recvreq.h"
+
+#include "event_collection_impl.h"
+#include "ompi/mca/bml/base/base.h"
+#include "pml_ob1_accelerator.h"
+#include "pml_ob1_rdmafrag.h"
 #include "pml_ob1_recvfrag.h"
 #include "pml_ob1_sendreq.h"
-#include "pml_ob1_rdmafrag.h"
-#include "pml_ob1_accelerator.h"
-#include "ompi/mca/bml/base/base.h"
 
 int mca_pml_ob1_accelerator_need_buffers(mca_pml_ob1_recv_request_t* recvreq,
                                          mca_btl_base_module_t* btl);
@@ -1173,6 +1175,7 @@ recv_req_match_specific_proc( const mca_pml_ob1_recv_request_t *req,
     }
     return NULL;
 #else
+    add_recv_event(req->req_recv.req_base.req_comm->c_pml_comm,  req->req_recv.req_base.req_tag,req->req_recv.req_base.req_peer);
     return custom_match_umq_find_verify_hold(req->req_recv.req_base.req_comm->c_pml_comm->umq,
                                              req->req_recv.req_base.req_tag,
                                              req->req_recv.req_base.req_peer,
@@ -1202,6 +1205,7 @@ recv_req_match_wild( mca_pml_ob1_recv_request_t* req,
 
 #if MCA_PML_OB1_CUSTOM_MATCH
     mca_pml_ob1_recv_frag_t* frag;
+    add_recv_event(req->req_recv.req_base.req_comm->c_pml_comm,  req->req_recv.req_base.req_tag,req->req_recv.req_base.req_peer);
     frag = custom_match_umq_find_verify_hold (comm->umq, req->req_recv.req_base.req_tag,
                                               req->req_recv.req_base.req_peer,
                                               hold_prev, hold_elem, hold_index);

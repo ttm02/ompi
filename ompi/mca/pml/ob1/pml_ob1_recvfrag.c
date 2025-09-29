@@ -55,6 +55,9 @@
 #include "pml_ob1_sendreq.h"
 #include "pml_ob1_hdr.h"
 #include "pml_ob1_accelerator.h"
+#include "event_collection_impl.h"
+
+struct matching_events* events=NULL;
 
 OBJ_CLASS_INSTANCE( mca_pml_ob1_buffer_t,
                     opal_free_list_item_t,
@@ -908,6 +911,7 @@ static mca_pml_ob1_recv_request_t *match_incomming(const mca_pml_ob1_match_hdr_t
 
     return NULL;
 #else
+    add_msg_arrive_event(comm,hdr->hdr_tag, hdr->hdr_src);
     return custom_match_prq_find_dequeue_verify(comm->prq, hdr->hdr_tag, hdr->hdr_src);
 #endif
 }
