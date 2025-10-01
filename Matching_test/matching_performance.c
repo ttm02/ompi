@@ -10,6 +10,7 @@
  */
 #include "matching_performance.h"
 
+#include "../ompi/include/mpi.h"
 #include "../ompi/mca/pml/pml_constants.h"
 
 #include <assert.h>
@@ -84,9 +85,50 @@ static inline void read_events_from_file(char* dirname, char *filename)
             sequence.num_phases=1;
             sequence.phase_size=count;
             sequence.ops = ops;
-            //TODO actually check for wildcards
+
             sequence.has_any_source=false;
             sequence.has_any_tag=false;
+            int seen_tags[count];   // store distinct tags
+            int seen_ranks[count];  // store distinct ranks
+            int seen_tags_count = 0;
+            int seen_ranks_count = 0;
+            // check for wildcards and print statistics
+            for (int i = 0; i < count; ++i) {
+                struct operation* o = &ops[i];
+                if (o->tag == MPI_ANY_TAG) {
+                    sequence.has_any_tag=true;
+
+                }else {
+                    // check if tag already seen
+                    int found = 0;
+                    for (int j = 0; j < seen_tags_count; ++j) {
+                        if (seen_tags[j] == o->tag) {
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        seen_tags[seen_tags_count++] = o->tag;
+                    }
+                }
+                if (o->rank == MPI_ANY_SOURCE) {
+                    sequence.has_any_tag=true;
+                } else {
+                    // check if rank already seen
+                    int found = 0;
+                    for (int j = 0; j < seen_ranks_count; ++j) {
+                        if (seen_ranks[j] == o->rank) {
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        seen_ranks[seen_ranks_count++] = o->rank;
+                    }
+                }
+            }
+            printf("Distinct tags: %d and Ranks: %d \n", seen_tags_count,seen_ranks_count);
+
             register_sequence(&sequence);
         }
     }
@@ -457,6 +499,7 @@ void run_for_all_implementations(char *sequence_name, int num_phases, int num_op
             result->uq_max = 0;
 
         } else {
+            printf("%s : %s\n",impl->name,sequence_name);
             run_experiment(num_phases, num_ops_per_phase, operations, result,
                            impl->init_matching_queues, impl->destroy_matching_queues,
                            impl->try_match_incoming, impl->try_match_receive);
